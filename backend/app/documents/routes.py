@@ -100,7 +100,12 @@ def get_document_file(
     path = request.app.state.config.upload_dir / Path(record.stored_filename).name
     if not path.is_file():
         raise HTTPException(status_code=404, detail="Stored document file was not found.")
-    return FileResponse(path, media_type=record.content_type, filename=record.original_filename)
+    return FileResponse(
+        path,
+        media_type=record.content_type,
+        filename=record.original_filename,
+        content_disposition_type="inline",
+    )
 
 
 @router.delete("/{document_id}", status_code=status.HTTP_204_NO_CONTENT)

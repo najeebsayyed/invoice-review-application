@@ -75,6 +75,7 @@ class DocumentRepository:
         extraction: dict[str, Any] | None,
         validation: dict[str, Any] | None,
         gl_suggestion: dict[str, Any] | None,
+        review_data: dict[str, Any] | None = None,
         accounting_coding: AccountingCoding | None,
         issues: list[ValidationIssue],
         vendor_name: str | None = None,
@@ -87,6 +88,7 @@ class DocumentRepository:
         record.extraction = extraction
         record.validation = validation
         record.gl_suggestion = gl_suggestion
+        record.review_data = review_data
         record.accounting_coding = (
             accounting_coding.model_dump(mode="json") if accounting_coding is not None else None
         )

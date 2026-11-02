@@ -19,7 +19,7 @@ class AppConfig:
 
     expected_customer_name: str = "Northstar Facilities B.V."
     expected_customer_vat_id: str = "NL00449544B01"
-    database_url: str = "sqlite:///./data/documents.db"
+    database_url: str = f"sqlite:///{(BACKEND_ROOT / 'data' / 'documents.db').as_posix()}"
     upload_dir: Path = BACKEND_ROOT / "data" / "uploads"
     max_upload_bytes: int = 4 * 1024 * 1024
     min_field_confidence: float = 0.80
@@ -42,6 +42,16 @@ class Settings(BaseSettings):
     openai_api_key: str | None = Field(default=None)
     openai_model: str = DEPLOYMENT_NAME
     allowed_origin: str = "http://localhost:5173"
+
+    def resolve_frontend_dist(self) -> Path | None:
+        """Resolve built frontend static assets directory if available."""
+        for candidate in (
+            BACKEND_ROOT.parent / "frontend" / "dist",
+            Path("/app/frontend/dist"),
+        ):
+            if candidate.is_dir():
+                return candidate
+        return None
 
 
 @lru_cache

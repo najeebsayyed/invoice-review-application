@@ -39,6 +39,7 @@ class DocumentRecord(Base):
     extraction: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     validation: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     gl_suggestion: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    review_data: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     accounting_coding: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     issues: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)

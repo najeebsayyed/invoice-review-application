@@ -10,7 +10,7 @@ from app.accounting.catalog import get_gl_account
 from app.accounting.schemas import AccountingCoding, AccountingSuggestion
 from app.documents.models import DocumentRecord
 from app.documents.repository import DocumentRepository
-from app.documents.schemas import DocumentStatus
+from app.documents.schemas import DocumentStatus, ReviewData, ReviewLineItem
 from app.invoices.validation import IssueSeverity, ValidationIssue
 from app.pipeline import GlSuggestion, create_pipeline
 
@@ -120,14 +120,63 @@ class DocumentService:
         issues = context.validation_issues
         accounting_coding = _accounting_from_suggestion(context.gl_suggestion)
 
-        # Extract normalized keys for duplicate detection
+        # Extract normalized keys and ReviewData projection
         vendor_name: str | None = None
         invoice_number: str | None = None
+        review_data: ReviewData | None = None
+
         if context.invoice_data:
-            vendor_name = context.invoice_data.vendor_name
-            invoice_number = context.invoice_data.invoice_number
+            inv = context.invoice_data
+            vendor_name = inv.vendor_name
+            invoice_number = inv.invoice_number
+            review_data = ReviewData(
+                document_type="invoice",
+                vendor_name=inv.vendor_name,
+                vendor_vat_id=inv.vendor_vat_id,
+                customer_name=inv.customer_name,
+                customer_vat_id=inv.customer_vat_id,
+                invoice_number=inv.invoice_number,
+                purchase_order=inv.purchase_order,
+                invoice_date=str(inv.invoice_date) if inv.invoice_date else None,
+                due_date=str(inv.due_date) if inv.due_date else None,
+                currency=inv.currency,
+                subtotal=inv.subtotal,
+                total_tax=inv.total_tax,
+                invoice_total=inv.invoice_total,
+                amount_due=inv.amount_due,
+                line_items=[
+                    ReviewLineItem(
+                        description=item.description,
+                        quantity=item.quantity,
+                        unit_price=item.unit_price,
+                        amount=item.amount,
+                    )
+                    for item in inv.items
+                ],
+            )
         elif context.receipt_data:
-            vendor_name = context.receipt_data.merchant_name
+            rec = context.receipt_data
+            vendor_name = rec.merchant_name
+            review_data = ReviewData(
+                document_type="receipt",
+                expense_category=rec.receipt_type,
+                vendor_name=rec.merchant_name,
+                invoice_date=str(rec.transaction_date) if rec.transaction_date else None,
+                currency=rec.currency,
+                subtotal=rec.subtotal,
+                total_tax=rec.total_tax,
+                invoice_total=rec.total,
+                amount_due=rec.total,
+                line_items=[
+                    ReviewLineItem(
+                        description=item.description,
+                        quantity=item.quantity,
+                        unit_price=item.unit_price,
+                        amount=item.total_price,
+                    )
+                    for item in rec.items
+                ],
+            )
 
         return self.repository.save_result(
             record_id,
@@ -151,6 +200,7 @@ class DocumentService:
                 if context.gl_suggestion
                 else None
             ),
+            review_data=review_data.model_dump(mode="json") if review_data else None,
             accounting_coding=accounting_coding,
             issues=issues,
             vendor_name=vendor_name,

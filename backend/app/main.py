@@ -6,12 +6,32 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+from sqlalchemy import Engine, text
 
 from app.accounting.routes import router as accounting_router
 from app.config import APP_CONFIG, get_settings
 from app.database import build_database
 from app.documents.models import DocumentRecord
 from app.documents.routes import router as document_router
+
+
+def _sync_sqlite_schema(engine: Engine) -> None:
+    """Ensure SQLite table schema contains all columns defined on DocumentRecord."""
+    if not str(engine.url).startswith("sqlite"):
+        return
+    with engine.connect() as conn:
+        result = conn.execute(text("PRAGMA table_info(documents)"))
+        existing_cols = {row[1] for row in result.fetchall()}
+        if existing_cols:
+            for column in DocumentRecord.__table__.columns:
+                if column.name not in existing_cols:
+                    col_type = column.type.compile(engine.dialect)
+                    conn.execute(
+                        text(f"ALTER TABLE documents ADD COLUMN {column.name} {col_type}")
+                    )
+            conn.commit()
 
 
 def create_app() -> FastAPI:
@@ -24,6 +44,7 @@ def create_app() -> FastAPI:
 
     engine, session_factory = build_database(config.database_url)
     DocumentRecord.metadata.create_all(engine)
+    _sync_sqlite_schema(engine)
 
     settings = get_settings()
 
@@ -54,6 +75,19 @@ def create_app() -> FastAPI:
     def health() -> dict[str, str]:
         """Health check endpoint."""
         return {"status": "ok"}
+
+    frontend_dist = settings.resolve_frontend_dist()
+    if frontend_dist is not None:
+        assets_dir = frontend_dist / "assets"
+        if assets_dir.is_dir():
+            app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
+
+        @app.get("/{full_path:path}", include_in_schema=False)
+        def spa_fallback(full_path: str) -> FileResponse:
+            candidate = frontend_dist / full_path
+            if full_path and candidate.is_file():
+                return FileResponse(candidate)
+            return FileResponse(frontend_dist / "index.html")
 
     return app
 
