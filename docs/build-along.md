@@ -88,36 +88,68 @@ uv run --locked --no-sync python ../playground/run_receipt.py 13-nl-fuel-receipt
 
 ### Outcome
 
-A typed, structured OpenAIService in pp/services/openai_service.py that mirrors DocumentIntelligenceService by accepting file paths, raw bytes, or binary streams of invoices and receipts (PDF, PNG, JPEG), extracting structured data via OpenAI Responses API, and returning normalized InvoiceData and ReceiptData domain models. Also provides document classification (invoice vs 
-eceipt) and automatic dispatch via process_document.
+A typed, structured `OpenAIService` in `app/services/openai_service.py` that mirrors `DocumentIntelligenceService` by accepting file paths, raw bytes, or binary streams of invoices and receipts (PDF, PNG, JPEG), extracting structured data via OpenAI Responses API, and returning normalized `InvoiceData` and `ReceiptData` domain models. Also provides document classification (`invoice` vs `receipt`) and automatic dispatch via `process_document`.
 
 ### Why this boundary exists
 
-OpenAI SDK types and API interactions are encapsulated entirely inside the provider adapter service. Application domain code receives only validated, typed InvoiceData and ReceiptData models with Decimal amounts, parsed dates, and confidence scores, maintaining identical contracts across extraction providers.
+OpenAI SDK types and API interactions are encapsulated entirely inside the provider adapter service. Application domain code receives only validated, typed `InvoiceData` and `ReceiptData` models with Decimal amounts, parsed dates, and confidence scores, maintaining identical contracts across extraction providers.
 
 ### Commands
 
-`ash
+```bash
 cd backend
 uv run --locked --no-sync ruff check app ../playground
 uv run --locked --no-sync python test.py
 uv run --locked --no-sync python ../playground/run_openai.py 01-en-happy-classic.pdf
 uv run --locked --no-sync python ../playground/run_openai.py 13-nl-fuel-receipt.png
-`
+```
 
 ### Observable result
 
-- 	est.py initializes OpenAIService from .env (OPENAI_API_KEY and OPENAI_MODEL) and extracts sample invoice data.
-- 
-un_openai.py classifies the document, extracts structured fields using strict schema responses, and serializes clean JSON adhering to InvoiceData or ReceiptData.
+- `test.py` initializes `OpenAIService` from `.env` (`OPENAI_API_KEY` and `OPENAI_MODEL`) and extracts sample invoice data.
+- `run_openai.py` classifies the document, extracts structured fields using strict schema responses, and serializes clean JSON adhering to `InvoiceData` or `ReceiptData`.
 
 ### Checkpoint
 
-- [x] pp/services/openai_service.py created with OpenAIService and OpenAISettings.
-- [x] Unified export in pp/services/__init__.py.
-- [x] Strict structured output parsing for InvoiceData and ReceiptData.
-- [x] Document classification method classify_document.
-- [x] Interactive playground script playground/run_openai.py.
-- [x] Ruff checks pass across pp and playground.
+- [x] `app/services/openai_service.py` created with `OpenAIService` and `OpenAISettings`.
+- [x] Unified export in `app/services/__init__.py`.
+- [x] Strict structured output parsing for `InvoiceData` and `ReceiptData`.
+- [x] Document classification method `classify_document`.
+- [x] Interactive playground script `playground/run_openai.py`.
+- [x] Ruff checks pass across `app` and `playground`.
+
+## Working slice: Pipeline Step 1 - LLM Document Classification
+
+### Outcome
+
+The initial stage of the document processing pipeline: an LLM-backed `DocumentClassifier` that inspects an uploaded PDF or image file and classifies it as either an `invoice` or `receipt` before deep extraction runs. Wrapped as `ClassificationStep` adhering to the `PipelineStep` protocol and updating an immutable `PipelineContext`.
+
+### Why this boundary exists
+
+Extracting structured financial documents requires different prebuilt models, schemas, and validation policies for invoices versus receipts. Classifying upfront routes the document efficiently, avoids unnecessary token/compute costs, and isolates classification logic from downstream extraction and accounting rules.
+
+### Commands
+
+```bash
+cd backend
+uv run --locked --no-sync ruff check app ../playground
+uv run --locked --no-sync python ../playground/run_classifier.py 01-en-happy-classic.pdf
+uv run --locked --no-sync python ../playground/run_classifier.py 13-nl-fuel-receipt.png
+```
+
+### Observable result
+
+- `run_classifier.py` runs `ClassificationStep` inside `Pipeline` on sample documents.
+- `01-en-happy-classic.pdf` is classified as `invoice` with confidence and reasoning.
+- `13-nl-fuel-receipt.png` is classified as `receipt` with confidence and reasoning.
+- `PipelineContext` is immutably updated via `model_copy(update={"classification": classification})`.
+
+### Checkpoint
+
+- [x] `app/pipeline/base.py` created with `PipelineContext`, `PipelineStep`, and `Pipeline`.
+- [x] `app/pipeline/classification.py` created with `DocumentClassifier`, `DocumentClassification`, `DocumentKind`, and `ClassificationStep`.
+- [x] Unified exports in `app/pipeline/__init__.py`.
+- [x] `playground/run_classifier.py` playground script created and verified on sample invoices and receipts.
+- [x] Ruff checks pass across `app` and `playground`.
 
 Continue with the [online tutorial](https://learn.datalumina.com/docs/invoice-review).
