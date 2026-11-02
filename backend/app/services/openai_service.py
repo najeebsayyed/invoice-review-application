@@ -7,7 +7,7 @@ import logging
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
-from typing import IO, Literal
+from typing import IO, Any, Literal
 
 from openai import OpenAI
 from pydantic import BaseModel, ConfigDict
@@ -151,6 +151,13 @@ class _DocumentClassification(BaseModel):
     document_type: Literal["invoice", "receipt"]
     confidence: float
     reason: str
+
+    model_config = ConfigDict(extra="ignore")
+
+
+class _CorrectionEmailDraft(BaseModel):
+    subject: str
+    body: str
 
     model_config = ConfigDict(extra="ignore")
 
@@ -493,6 +500,62 @@ class OpenAIService:
             return date.fromisoformat(cleaned)
         except Exception:
             return cleaned
+
+    def draft_correction_email(
+        self,
+        *,
+        vendor_name: str | None,
+        invoice_number: str | None,
+        invoice_date: str | None,
+        currency: str | None,
+        invoice_total: str | float | Decimal | None,
+        issues: list[dict[str, Any] | str],
+    ) -> tuple[str, str]:
+        """Draft a polite, professional supplier correction request email."""
+        formatted_issues: list[str] = []
+        for issue in issues:
+            if isinstance(issue, dict):
+                code = issue.get("code", "")
+                msg = issue.get("message", "")
+                formatted_issues.append(f"- [{code}] {msg}")
+            else:
+                formatted_issues.append(f"- {issue}")
+        issues_summary = (
+            "\n".join(formatted_issues)
+            if formatted_issues
+            else "Discrepancy noted during review."
+        )
+
+        prompt_text = (
+            "You are drafting an email on behalf of Maya, Finance Administrator at "
+            "Northstar Facilities B.V., based in Amsterdam. Northstar received an invoice/receipt "
+            "from a supplier that failed internal finance policy checks.\n\n"
+            f"Supplier / Vendor: {vendor_name or 'Supplier'}\n"
+            f"Invoice / Document Number: {invoice_number or 'Not specified'}\n"
+            f"Invoice Date: {invoice_date or 'Not specified'}\n"
+            f"Total Amount: {invoice_total or 'Not specified'} {currency or 'EUR'}\n\n"
+            f"Validation issues found:\n{issues_summary}\n\n"
+            "Write a concise, courteous, and professional email clearly explaining the specific "
+            "issue(s) found, requesting an amended invoice, credit note, or correct details "
+            "(such as valid VAT identification, purchase order number, or total reconciliation), "
+            "and providing Northstar Facilities B.V.'s details if relevant. Sign the email from:\n"
+            "Maya\nFinance Administrator\nNorthstar Facilities B.V."
+        )
+
+        response = self._client.responses.parse(
+            model=self._model,
+            text_format=_CorrectionEmailDraft,
+            input=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "input_text", "text": prompt_text},
+                    ],
+                }
+            ],
+        )
+        draft = response.output_parsed
+        return draft.subject, draft.body
 
 
 __all__ = [

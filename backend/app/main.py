@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -84,6 +84,8 @@ def create_app() -> FastAPI:
 
         @app.get("/{full_path:path}", include_in_schema=False)
         def spa_fallback(full_path: str) -> FileResponse:
+            if full_path.startswith("api/") or full_path == "api":
+                raise HTTPException(status_code=404, detail="API route not found.")
             candidate = frontend_dist / full_path
             if full_path and candidate.is_file():
                 return FileResponse(candidate)

@@ -1,5 +1,5 @@
 import { apiBaseUrl } from './env'
-import type { Document, GlAccount } from './types'
+import type { CorrectionEmail, Document, FieldCorrections, GlAccount } from './types'
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${apiBaseUrl}${path}`, {
@@ -59,6 +59,20 @@ export function decideDocument(id: string, decision: 'approved' | 'rejected'): P
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ decision }),
+  })
+}
+
+export function updateCorrections(id: string, corrections: FieldCorrections): Promise<Document> {
+  return request<Document>(`/api/documents/${encodeURIComponent(id)}/corrections`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(corrections),
+  })
+}
+
+export function draftCorrectionEmail(id: string): Promise<CorrectionEmail> {
+  return request<CorrectionEmail>(`/api/documents/${encodeURIComponent(id)}/correction-email`, {
+    method: 'POST',
   })
 }
 

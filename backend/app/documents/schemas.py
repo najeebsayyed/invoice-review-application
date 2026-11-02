@@ -49,6 +49,8 @@ class ReviewData(BaseModel):
     invoice_total: Decimal | None = None
     amount_due: Decimal | None = None
     line_items: list[ReviewLineItem] = Field(default_factory=list)
+    provenance: dict[str, str] = Field(default_factory=dict)
+    conflicts: dict[str, dict[str, Any]] = Field(default_factory=dict)
 
 
 class DocumentResponse(BaseModel):
@@ -77,3 +79,27 @@ class DecisionRequest(BaseModel):
     """Payload for user approving or rejecting a document review."""
 
     decision: Literal["approved", "rejected"]
+
+
+class FieldCorrectionRequest(BaseModel):
+    """Payload for reviewer correcting extracted document fields."""
+
+    vendor_name: str | None = None
+    vendor_vat_id: str | None = None
+    customer_name: str | None = None
+    customer_vat_id: str | None = None
+    invoice_number: str | None = None
+    purchase_order: str | None = None
+    invoice_date: str | None = None
+    due_date: str | None = None
+    currency: str | None = None
+    subtotal: Decimal | None = None
+    total_tax: Decimal | None = None
+    invoice_total: Decimal | None = None
+
+
+class CorrectionEmailResponse(BaseModel):
+    """Structured supplier correction email draft."""
+
+    subject: str
+    body: str

@@ -34,6 +34,28 @@ export interface ReviewData {
   invoice_total: string | number | null
   amount_due: string | number | null
   line_items: ReviewLineItem[]
+  provenance?: Record<string, 'primary' | 'secondary' | 'user'>
+  conflicts?: Record<string, { primary: unknown; secondary: unknown }>
+}
+
+export interface FieldCorrections {
+  vendor_name?: string
+  vendor_vat_id?: string
+  customer_name?: string
+  customer_vat_id?: string
+  invoice_number?: string
+  purchase_order?: string
+  invoice_date?: string
+  due_date?: string
+  currency?: string
+  subtotal?: number | string
+  total_tax?: number | string
+  invoice_total?: number | string
+}
+
+export interface CorrectionEmail {
+  subject: string
+  body: string
 }
 
 export interface ValidationIssue {

@@ -10,9 +10,22 @@ from app.accounting.catalog import get_gl_account
 from app.accounting.schemas import AccountingCoding, AccountingSuggestion
 from app.documents.models import DocumentRecord
 from app.documents.repository import DocumentRepository
-from app.documents.schemas import DocumentStatus, ReviewData, ReviewLineItem
-from app.invoices.validation import IssueSeverity, ValidationIssue
+from app.documents.schemas import (
+    DocumentStatus,
+    FieldCorrectionRequest,
+    ReviewData,
+    ReviewLineItem,
+)
+from app.invoices.validation import (
+    IssueSeverity,
+    ValidationIssue,
+    validate_invoice,
+    validate_receipt,
+)
 from app.pipeline import GlSuggestion, create_pipeline
+from app.schemas.invoice import InvoiceData
+from app.schemas.receipt import ReceiptData
+from app.services.openai_service import OpenAIService
 
 logger = logging.getLogger(__name__)
 
@@ -125,6 +138,9 @@ class DocumentService:
         invoice_number: str | None = None
         review_data: ReviewData | None = None
 
+        prov = context.metadata.get("provenance", {})
+        conf = context.metadata.get("conflicts", {})
+
         if context.invoice_data:
             inv = context.invoice_data
             vendor_name = inv.vendor_name
@@ -153,6 +169,8 @@ class DocumentService:
                     )
                     for item in inv.items
                 ],
+                provenance=prov,
+                conflicts=conf,
             )
         elif context.receipt_data:
             rec = context.receipt_data
@@ -176,6 +194,8 @@ class DocumentService:
                     )
                     for item in rec.items
                 ],
+                provenance=prov,
+                conflicts=conf,
             )
 
         return self.repository.save_result(
@@ -266,3 +286,87 @@ class DocumentService:
             raise ValueError(f"Unsupported decision: '{decision}'")
 
         return self.repository.set_status(record_id, decision)  # type: ignore[arg-type]
+
+    def apply_corrections(
+        self, record_id: str, corrections: FieldCorrectionRequest
+    ) -> DocumentRecord:
+        """Apply reviewer field corrections and recompute deterministic Northstar policy issues."""
+        record = self.get(record_id)
+        if record.status in {"approved", "rejected"}:
+            raise DocumentReviewConflictError(
+                f"Cannot correct document in final '{record.status}' status."
+            )
+        if not record.review_data:
+            raise DocumentReviewConflictError("Document has no review data to correct.")
+
+        review = ReviewData.model_validate(record.review_data)
+        corrections_dict = corrections.model_dump(exclude_unset=True)
+
+        for field, new_val in corrections_dict.items():
+            if new_val is not None:
+                setattr(review, field, new_val)
+                review.provenance[field] = "user"
+
+        if review.document_type == "receipt":
+            rec_data = ReceiptData(
+                merchant_name=review.vendor_name,
+                transaction_date=review.invoice_date,
+                subtotal=review.subtotal,
+                total_tax=review.total_tax,
+                total=review.invoice_total,
+                currency=review.currency,
+                receipt_type=review.expense_category,
+            )
+            new_issues = validate_receipt(rec_data)
+        else:
+            existing_invoices = self.repository.get_existing_invoices(exclude_id=record_id)
+            inv_data = InvoiceData(
+                vendor_name=review.vendor_name,
+                vendor_vat_id=review.vendor_vat_id,
+                customer_name=review.customer_name,
+                customer_vat_id=review.customer_vat_id,
+                invoice_number=review.invoice_number,
+                invoice_date=review.invoice_date,
+                due_date=review.due_date,
+                purchase_order=review.purchase_order,
+                currency=review.currency,
+                subtotal=review.subtotal,
+                total_tax=review.total_tax,
+                invoice_total=review.invoice_total,
+            )
+            new_issues = validate_invoice(inv_data, existing_invoices=existing_invoices)
+
+        new_status = status_for_issues(new_issues)
+        return self.repository.save_corrections(
+            record_id,
+            status=new_status,
+            review_data=review.model_dump(mode="json"),
+            issues=new_issues,
+            vendor_name=review.vendor_name,
+            invoice_number=review.invoice_number,
+        )
+
+    def draft_correction_email(self, record_id: str) -> tuple[str, str]:
+        """Draft a formal supplier correction request email using Azure OpenAI."""
+        record = self.get(record_id)
+        review = (
+            ReviewData.model_validate(record.review_data)
+            if record.review_data
+            else None
+        )
+
+        vendor = review.vendor_name if review else record.normalized_vendor_name
+        inv_num = review.invoice_number if review else record.normalized_invoice_number
+        inv_date = review.invoice_date if review else None
+        currency = review.currency if review else "EUR"
+        total = review.invoice_total if review else None
+
+        openai_service = OpenAIService()
+        return openai_service.draft_correction_email(
+            vendor_name=vendor,
+            invoice_number=inv_num,
+            invoice_date=inv_date,
+            currency=currency,
+            invoice_total=total,
+            issues=record.issues or [],
+        )

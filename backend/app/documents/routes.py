@@ -14,7 +14,12 @@ from app.accounting.schemas import AccountingSelectionRequest
 from app.config import AppConfig
 from app.documents.models import DocumentRecord
 from app.documents.repository import DocumentRepository
-from app.documents.schemas import DecisionRequest, DocumentResponse
+from app.documents.schemas import (
+    CorrectionEmailResponse,
+    DecisionRequest,
+    DocumentResponse,
+    FieldCorrectionRequest,
+)
 from app.documents.service import (
     DocumentContentError,
     DocumentNotFoundError,
@@ -201,3 +206,41 @@ def upload_document(
         raise HTTPException(status_code=502, detail=str(error)) from error
 
     return to_response(record)
+
+
+@router.put("/{document_id}/corrections", response_model=DocumentResponse)
+def apply_corrections(
+    document_id: str,
+    body: FieldCorrectionRequest,
+    request: Request,
+    repository: Annotated[DocumentRepository, Depends(get_repository)],
+) -> DocumentResponse:
+    """Apply reviewer corrections to extracted fields and re-run policy validation."""
+    service = build_service(request, repository)
+    try:
+        record = service.apply_corrections(document_id, body)
+    except DocumentNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except DocumentReviewConflictError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=str(error)) from error
+
+    return to_response(record)
+
+
+@router.post("/{document_id}/correction-email", response_model=CorrectionEmailResponse)
+def draft_correction_email(
+    document_id: str,
+    request: Request,
+    repository: Annotated[DocumentRepository, Depends(get_repository)],
+) -> CorrectionEmailResponse:
+    """Generate an on-demand supplier correction email draft using Azure OpenAI."""
+    service = build_service(request, repository)
+    try:
+        subject, body = service.draft_correction_email(document_id)
+        return CorrectionEmailResponse(subject=subject, body=body)
+    except DocumentNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=str(error)) from error

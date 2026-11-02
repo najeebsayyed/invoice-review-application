@@ -111,6 +111,28 @@ class DocumentRepository:
         self._commit(record)
         return record
 
+    def save_corrections(
+        self,
+        record_id: str,
+        *,
+        status: DocumentStatus,
+        review_data: dict[str, Any],
+        issues: list[ValidationIssue],
+        vendor_name: str | None = None,
+        invoice_number: str | None = None,
+    ) -> DocumentRecord:
+        """Update document with corrected review data, recomputed issues, and updated status."""
+        record = self._require(record_id)
+        record.status = status
+        record.review_data = review_data
+        record.issues = [issue.model_dump(mode="json") for issue in issues]
+        if vendor_name is not None:
+            record.normalized_vendor_name = normalize_name(vendor_name)
+        if invoice_number is not None:
+            record.normalized_invoice_number = normalize_invoice_number(invoice_number)
+        self._commit(record)
+        return record
+
     def save_failure(self, record_id: str, message: str) -> DocumentRecord:
         """Mark record as failed with an error message."""
         record = self._require(record_id)

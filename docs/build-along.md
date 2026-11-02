@@ -287,4 +287,59 @@ cd ..
 - [x] Concurrent development scripts created in `scripts/dev.sh` and `scripts/dev.ps1`.
 - [x] TypeScript compilation, ESLint, and production build pass with zero errors.
 
+## Working slice: Human review flow, hybrid extraction with provenance, and corpus evaluators
+
+### Outcome
+
+A comprehensive human-in-the-loop review workflow empowering Maya to inspect evidence, correct extracted fields, generate supplier correction emails, and evaluate the full golden corpus:
+- **Field Provenance & Conflicts**: Every extracted field displays its origin pill (`Doc Intelligence` primary, `OpenAI fallback` secondary, or `Manual edit` user) with conflict badges when readings differed.
+- **Inline Field Corrections & Revalidation**: Reviewers can edit extracted fields directly in the UI. Saving dispatches `PUT /api/documents/{id}/corrections`, which updates `ReviewData`, tags field provenance as `user`, re-runs pure Northstar validation rules, and clears resolved errors in real time.
+- **On-Demand Supplier Correction Email Drafting**: Reviewers can click "Draft correction email" to invoke Azure OpenAI (`POST /api/documents/{id}/correction-email`) with strict structured outputs, producing a polite, professional email detailing the exact discrepancies found with Copy Subject, Copy Body, and Copy Entire Email actions. The app never connects to email infrastructure or sends emails automatically.
+- **Corpus Evaluation Goal**: Created `backend/scripts/evaluate_corpus.py` and `backend/scripts/evaluate_hybrid.py` to benchmark all 13 multilingual documents against `samples/manifest.json`.
+
+### Why this boundary exists
+
+- Document Intelligence remains primary; the secondary LLM fills missing fields without overwriting primary values.
+- Model suggestions and email drafts remain advisory. A person decides whether to approve, reject, or request a supplier correction.
+- Manual field corrections re-run pure Python validation rules deterministically without invoking cloud APIs or introducing side effects.
+- Fictional corpus evaluators provide reproducible, live cloud verification without automated unit tests or test frameworks.
+
+### Commands
+
+```bash
+# Backend code quality
+cd backend
+uv run --locked --no-sync ruff check app scripts ../playground
+
+# Frontend verification
+cd ../frontend
+pnpm exec tsc -b --pretty false
+pnpm lint
+pnpm build
+
+# Corpus and hybrid evaluations
+cd ../backend
+uv run --locked --no-sync python scripts/evaluate_hybrid.py
+uv run --locked --no-sync python scripts/evaluate_corpus.py
+```
+
+### Observable result
+
+- Step 3 (Review screen) surfaces field provenance tags and conflict indicators on every document attribute.
+- Editing an invalid field (e.g., correcting an invalid German VAT ID on `06-de-invalid-vendor-vat.pdf`) revalidates the document, clears the error, and transitions status from `needs_review` to `ready`.
+- Clicking "Draft correction email" renders a dialog with an AI-crafted email addressing the specific validation findings with copy-to-clipboard functionality.
+- `evaluate_hybrid.py` executes dual extraction against Document Intelligence and Azure OpenAI, reporting fallbacks and conflicts on `02-nl-happy-compact.pdf` and `13-nl-fuel-receipt.png`.
+
+### Checkpoint
+
+- [x] Schema extensions: `provenance` and `conflicts` in `ReviewData`, `FieldCorrectionRequest`, and `CorrectionEmailResponse`.
+- [x] Backend domain & repository: `save_corrections` in repository and `apply_corrections` in `DocumentService` with pure revalidation.
+- [x] Azure OpenAI email provider: `draft_correction_email` in `OpenAIService` using structured outputs.
+- [x] API routes: `PUT /api/documents/{id}/corrections` and `POST /api/documents/{id}/correction-email`.
+- [x] Frontend typed API client: `updateCorrections` and `draftCorrectionEmail` in `api.ts`.
+- [x] Frontend UI: Inline field editing, provenance & conflict pills, and modal dialog for supplier correction emails in `DocumentReview.tsx`.
+- [x] Golden corpus evaluators created: `backend/scripts/evaluate_corpus.py` and `backend/scripts/evaluate_hybrid.py`.
+- [x] Ruff lint passes across `app`, `scripts`, and `playground`.
+- [x] Frontend TypeScript typecheck, ESLint, and production build pass with zero errors.
+
 Continue with the [online tutorial](https://learn.datalumina.com/docs/invoice-review).
