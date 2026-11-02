@@ -152,4 +152,87 @@ uv run --locked --no-sync python ../playground/run_classifier.py 13-nl-fuel-rece
 - [x] `playground/run_classifier.py` playground script created and verified on sample invoices and receipts.
 - [x] Ruff checks pass across `app` and `playground`.
 
+## Working slice: Pipeline runner, routed extraction, and Northstar policy validation
+
+### Outcome
+
+A complete document review pipeline runner (`Pipeline`) coordinating:
+1. `ClassificationStep`: LLM document classification into `invoice` vs `receipt`.
+2. `ExtractionStep`: Dynamic routing to Document Intelligence (`prebuilt-invoice` or `prebuilt-receipt`) with secondary LLM fallback for missing fields, tracking provenance and conflicts.
+3. `ValidationStep`: Pure deterministic Northstar finance policy rules (`app/invoices/validation.py`) checking EU VAT via `python-stdnum`, Northstar customer VAT, mandatory fields, math reconciliation within EUR 0.01, duplicate detection, and warning thresholds.
+
+### Why this boundary exists
+
+- Business rules remain pure, testable, and isolated in `app/invoices/validation.py` without leaking Azure or OpenAI SDK dependencies.
+- Extraction models are routed dynamically by document kind, preventing mismatched schema parsing and unnecessary cloud compute.
+- The pipeline runner threads state via an immutable `PipelineContext`, keeping stages decoupled, inspectable, and extensible for future stages.
+
+### Commands
+
+```bash
+cd backend
+uv run --locked --no-sync ruff check app ../playground
+uv run --locked --no-sync python ../playground/run_pipeline.py 01-en-happy-classic.pdf
+uv run --locked --no-sync python ../playground/run_pipeline.py 05-nl-missing-vendor-vat.pdf
+uv run --locked --no-sync python ../playground/run_pipeline.py 10-de-duplicate.pdf
+uv run --locked --no-sync python ../playground/run_pipeline.py 13-nl-fuel-receipt.png
+```
+
+### Observable result
+
+- Individual documents are processed through classification, routed extraction, and Northstar policy validation.
+- Valid documents produce `is_valid=True` and status `APPROVED`.
+- Non-compliant documents produce typed `ValidationIssue` objects (`code`, `severity`, `field`, `message`) matching evaluation corpus ground truths.
+
+### Checkpoint
+
+- [x] `app/pipeline/base.py` updated with `PipelineContext`, `PipelineStep`, and sequential `Pipeline` runner.
+- [x] `app/pipeline/extraction.py` created with `ExtractionStep`, document kind routing, and deterministic merging.
+- [x] `app/invoices/validation.py` created with pure Northstar policy rules, EU VAT checksum verification (`python-stdnum`), and typed `ValidationIssue` models.
+- [x] `app/pipeline/validation.py` created with `ValidationStep`.
+- [x] Unified factory `create_pipeline` in `app/pipeline/__init__.py`.
+- [x] `playground/run_pipeline.py` created with single-document and batch evaluation modes.
+- [x] Ruff lint checks pass across `app` and `playground`.
+
+## Working slice: General Ledger account categorization step (10-account catalog)
+
+### Outcome
+
+A structured pipeline step (`GlCategorizationStep`) that evaluates normalized invoice or receipt domain models and suggests the most appropriate General Ledger account from Northstar's fixed 10-account catalog (`6100` - `6190`). The suggestion includes an exact catalog enum code, a normalized confidence score (0.0 to 1.0), and a human-readable rationale that Maya (the finance reviewer) can inspect.
+
+### Why this boundary exists
+
+- The GL categorizer receives only normalized domain models (`InvoiceData` or `ReceiptData`), never raw PDF/image bytes or unparsed documents.
+- Model output never becomes business policy: the catalog definition and code selection validation live in `app/accounting/catalog.py` and enforce that suggestions strictly match Northstar's chart of accounts.
+- The pipeline context preserves the suggestion as advisory metadata (`ctx.gl_suggestion`), leaving final booking approval and override capability in the reviewer's hands.
+
+### Commands
+
+```bash
+cd backend
+uv run --locked --no-sync ruff check app ../playground
+uv run --locked --no-sync python ../playground/run_pipeline.py 01-en-happy-classic.pdf
+uv run --locked --no-sync python ../playground/run_pipeline.py 02-nl-happy-compact.pdf
+uv run --locked --no-sync python ../playground/run_pipeline.py 13-nl-fuel-receipt.png
+```
+
+### Observable result
+
+- Step 4 (`[Step 4: GL Account Suggestion]`) runs as the final pipeline stage.
+- `01-en-happy-classic.pdf` (Bright Spark Europe) &rarr; `6110 - Building maintenance` (or electrical).
+- `02-nl-happy-compact.pdf` (Helder Schoonmaak) &rarr; `6100 - Cleaning services` with high confidence.
+- `13-nl-fuel-receipt.png` (North Sea Fuel) &rarr; `6170 - Travel and transport` with high confidence.
+- Clear, readable reason strings explaining the selection rationale for human review.
+
+### Checkpoint
+
+- [x] Fixed 10-account Northstar GL catalog and selection validator created in `app/accounting/catalog.py`.
+- [x] Pydantic suggestion and selection schemas created in `app/accounting/schemas.py`.
+- [x] Accounting exports unified in `app/accounting/__init__.py`.
+- [x] `GlCategorizer` and `GlCategorizationStep` implemented in `app/pipeline/gl_categorization.py`.
+- [x] `PipelineContext` updated with `gl_suggestion: GlSuggestion | None`.
+- [x] `create_pipeline` factory updated to include `GlCategorizationStep`.
+- [x] `playground/run_pipeline.py` updated to display Step 4 GL suggestions.
+- [x] Ruff lint checks pass cleanly across `app` and `playground`.
+
 Continue with the [online tutorial](https://learn.datalumina.com/docs/invoice-review).

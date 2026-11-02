@@ -107,7 +107,17 @@ def run_single_document(file_path: Path, manifest_entry: dict | None = None) -> 
         badge = f"[{issue.severity.upper()}]"
         print(f"    {badge:<9} {issue.code} ({issue.field}): {issue.message}")
 
-    # 4. Manifest check if entry provided
+    # 4. GL Account Suggestion
+    print("\n[Step 4: GL Account Suggestion]")
+    gl = result_ctx.gl_suggestion
+    if gl:
+        print(f"  Account   : {gl.account_code.value} - {gl.account_name}")
+        print(f"  Confidence: {gl.confidence:.2f}")
+        print(f"  Reasoning : {gl.reasoning}")
+    else:
+        print("  [ERROR] GL suggestion missing.")
+
+    # 5. Manifest check if entry provided
     if manifest_entry:
         expected_codes = set(manifest_entry.get("expected_issue_codes", []))
         actual_codes = set(result_ctx.issue_codes)

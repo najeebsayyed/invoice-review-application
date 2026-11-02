@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.accounting.schemas import GlSuggestion
 from app.invoices.validation import IssueSeverity, ValidationIssue
 from app.schemas.invoice import InvoiceData
 from app.schemas.receipt import ReceiptData
@@ -37,6 +38,7 @@ class PipelineContext(BaseModel):
     invoice_data: InvoiceData | None = None
     receipt_data: ReceiptData | None = None
     validation_issues: list[ValidationIssue] = Field(default_factory=list)
+    gl_suggestion: GlSuggestion | None = None
     is_valid: bool = True
     errors: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
