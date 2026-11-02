@@ -411,4 +411,40 @@ pnpm build
 - [x] App orchestration: Integrated live KPI metrics fetching and state synchronization in `App.tsx`.
 - [x] TypeScript typecheck, ESLint, and production Vite build pass with zero errors.
 
+## End-to-End System Verification Runner
+
+### Outcome
+
+Created a comprehensive, offline system verification runner (`backend/scripts/verify_system.py`) that executes in under 5 seconds using FastAPI's `TestClient` and an isolated temporary SQLite database. Exercises 8 critical lifecycle checkpoints: health check & GL catalog retrieval, binary file magic-byte enforcement, document persistence, GL assignment, reviewer corrections with pure revalidation, final decision state immutability, aggregate KPI metrics & search filtering, and document deletion with storage cleanup.
+
+### Why this boundary exists
+
+- Conforms strictly to the project verification policy (no committed unit test suites or `*.test.*` files) while delivering reproducible, deterministic quality assurance for recruiters, hiring managers, and prospective clients.
+- Verifies edge cases (spoofed MIME types, invalid EU VAT IDs, state transition locks) without incurring cloud API costs or requiring live Azure credentials.
+- Guarantees database engines and file handles are safely released, ensuring cross-platform stability across Windows and Linux environments.
+
+### Commands
+
+```bash
+cd backend
+uv run --locked --no-sync python scripts/verify_system.py
+uv run --locked --no-sync ruff check app scripts ../playground
+```
+
+### Observable result
+
+- Running `verify_system.py` executes 8 consecutive stages, displaying a structured progress report and exiting with a clean `100% CHECKS PASSED` summary.
+- Ruff linter verifies syntax and import cleanliness across the entire backend codebase.
+
+### Checkpoint
+
+- [x] End-to-end verification script created: `backend/scripts/verify_system.py`.
+- [x] Tested MIME and magic byte security validation against forged file signatures.
+- [x] Tested document persistence, line-item extraction, and GL account override.
+- [x] Tested reviewer corrections with pure deterministic EU VAT and arithmetic revalidation.
+- [x] Tested approval immutability and state machine conflict enforcement (409 Conflict).
+- [x] Tested aggregate KPI metrics and search/status query filters.
+- [x] Tested document deletion and file storage cleanup.
+- [x] 100% pass rate achieved with zero warnings on Ruff linter.
+
 Continue with the [online tutorial](https://learn.datalumina.com/docs/invoice-review).
