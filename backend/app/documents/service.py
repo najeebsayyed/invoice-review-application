@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 from app.accounting.catalog import get_gl_account
@@ -233,6 +234,30 @@ class DocumentService:
         if record is None:
             raise DocumentNotFoundError(f"Document {record_id} was not found.")
         return record
+
+    def list(
+        self,
+        *,
+        status: DocumentStatus | None = None,
+        search: str | None = None,
+        sort_by: str = "created_at",
+        sort_order: str = "desc",
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[DocumentRecord]:
+        """List document records matching search, status filter, and pagination criteria."""
+        return self.repository.list(
+            status=status,
+            search=search,
+            sort_by=sort_by,
+            sort_order=sort_order,
+            limit=limit,
+            offset=offset,
+        )
+
+    def get_stats(self) -> dict[str, Any]:
+        """Retrieve aggregated KPI dashboard statistics across all reviews."""
+        return self.repository.get_stats()
 
     def delete(self, record_id: str) -> None:
         """Delete document record and associated file on disk."""

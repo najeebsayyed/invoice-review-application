@@ -18,6 +18,8 @@ from app.documents.schemas import (
     CorrectionEmailResponse,
     DecisionRequest,
     DocumentResponse,
+    DocumentStatsResponse,
+    DocumentStatus,
     FieldCorrectionRequest,
 )
 from app.documents.service import (
@@ -68,12 +70,57 @@ def to_response(record: DocumentRecord) -> DocumentResponse:
     return response.model_copy(update={"issues": issues})
 
 
+def validate_file_magic_bytes(content: bytes, content_type: str) -> None:
+    """Validate that file binary signature matches the declared MIME type."""
+    if content_type == "application/pdf":
+        if not content.startswith(b"%PDF"):
+            raise HTTPException(
+                status_code=422,
+                detail="Invalid file signature: declared as PDF but does not begin with %PDF.",
+            )
+    elif content_type == "image/png":
+        if not content.startswith(b"\x89PNG\r\n\x1a\n"):
+            raise HTTPException(
+                status_code=422,
+                detail="Invalid file signature: declared as PNG but does not match PNG signature.",
+            )
+    elif content_type in ("image/jpeg", "image/jpg"):
+        if not content.startswith(b"\xff\xd8\xff"):
+            raise HTTPException(
+                status_code=422,
+                detail="Invalid file signature: declared as JPEG but does not match signature.",
+            )
+
+
+@router.get("/stats", response_model=DocumentStatsResponse)
+def get_document_stats(
+    repository: Annotated[DocumentRepository, Depends(get_repository)],
+) -> DocumentStatsResponse:
+    """Retrieve aggregate KPI dashboard statistics across all processed documents."""
+    stats = repository.get_stats()
+    return DocumentStatsResponse(**stats)
+
+
 @router.get("", response_model=list[DocumentResponse])
 def list_documents(
     repository: Annotated[DocumentRepository, Depends(get_repository)],
+    status: DocumentStatus | None = None,
+    search: str | None = None,
+    sort_by: str = "created_at",
+    sort_order: str = "desc",
+    limit: int = 50,
+    offset: int = 0,
 ) -> list[DocumentResponse]:
-    """List all processed documents in chronological order."""
-    return [to_response(record) for record in repository.list()]
+    """List processed documents with optional filter, search term, sorting, and pagination."""
+    records = repository.list(
+        status=status,
+        search=search,
+        sort_by=sort_by,
+        sort_order=sort_order,
+        limit=limit,
+        offset=offset,
+    )
+    return [to_response(record) for record in records]
 
 
 @router.get("/{document_id}", response_model=DocumentResponse)
@@ -190,6 +237,8 @@ def upload_document(
             status_code=413,
             detail="File size exceeds maximum allowed limit (4 MB).",
         )
+
+    validate_file_magic_bytes(payload, content_type)
 
     original_filename = Path(file.filename or "document").name[:255]
     service = build_service(request, repository)

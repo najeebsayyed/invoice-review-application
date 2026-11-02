@@ -103,3 +103,15 @@ class CorrectionEmailResponse(BaseModel):
 
     subject: str
     body: str
+
+
+class DocumentStatsResponse(BaseModel):
+    """Aggregate KPI statistics across all review documents."""
+
+    total_documents: int
+    needs_review_count: int
+    ready_count: int
+    approved_count: int
+    rejected_count: int
+    total_spend: Decimal
+    currency: str = "EUR"

@@ -342,4 +342,37 @@ uv run --locked --no-sync python scripts/evaluate_corpus.py
 - [x] Ruff lint passes across `app`, `scripts`, and `playground`.
 - [x] Frontend TypeScript typecheck, ESLint, and production build pass with zero errors.
 
+## Hardened Validation, File Signatures, and Aggregate Metrics
+
+### Outcome
+
+Hardened backend file upload validation with magic-byte binary signature inspection, preventing spoofed MIME types. Added aggregate KPI metrics endpoint (`/api/documents/stats`) providing document counts by status and total approved spend in EUR. Extended `list_documents` with search, status filtering, sorting, and pagination.
+
+### Why this boundary exists
+
+- MIME type headers (`Content-Type`) sent by HTTP clients can easily be forged or spoofed. Magic-byte inspection verifies binary headers (`%PDF`, `\x89PNG`, `\xff\xd8\xff`) directly from the binary payload before passing it to parser services.
+- Financial dashboards require high-level operational insights (KPIs like total documents, spend, and pending reviews) without pulling the entire database client-side.
+- Clean database queries with deterministic sorting and filtering keep the API production-ready as document volumes grow.
+
+### Commands
+
+```bash
+cd backend
+uv run --locked --no-sync ruff check app scripts ../playground
+```
+
+### Observable result
+
+- Corrupted files or spoofed extensions (e.g. text file renamed to `.pdf`) trigger a clear 422 HTTP validation error with the invalid magic signature detail.
+- `GET /api/documents/stats` returns accurate aggregate counts (`total_documents`, `needs_review_count`, `ready_count`, `approved_count`, `rejected_count`, `total_spend`).
+- `GET /api/documents?status=needs_review&search=euro` filters documents deterministically.
+
+### Checkpoint
+
+- [x] File signature verification function `validate_file_magic_bytes` in `routes.py`.
+- [x] Aggregate metrics schema `DocumentStatsResponse` in `schemas.py`.
+- [x] Aggregate metrics query `get_stats()` in `repository.py` and `service.py`.
+- [x] Search, filter, and pagination parameters in `list()` and `GET /api/documents`.
+- [x] Ruff lint passes across all backend code with zero warnings.
+
 Continue with the [online tutorial](https://learn.datalumina.com/docs/invoice-review).

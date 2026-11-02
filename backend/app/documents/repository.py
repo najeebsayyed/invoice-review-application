@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import Select, select
@@ -59,12 +60,72 @@ class DocumentRepository:
         """Retrieve a document record by ID."""
         return self.session.get(DocumentRecord, record_id)
 
-    def list(self) -> list[DocumentRecord]:
-        """List all document records ordered by creation date descending."""
-        statement = select(DocumentRecord).order_by(
-            DocumentRecord.created_at.desc(), DocumentRecord.id.desc()
-        )
+    def list(
+        self,
+        *,
+        status: DocumentStatus | None = None,
+        search: str | None = None,
+        sort_by: str = "created_at",
+        sort_order: str = "desc",
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[DocumentRecord]:
+        """List document records with optional filter, search query, sorting, and pagination."""
+        statement = select(DocumentRecord)
+
+        if status:
+            statement = statement.where(DocumentRecord.status == status)
+
+        if search and search.strip():
+            term = f"%{search.strip().lower()}%"
+            statement = statement.where(
+                (DocumentRecord.normalized_vendor_name.ilike(term))
+                | (DocumentRecord.normalized_invoice_number.ilike(term))
+                | (DocumentRecord.original_filename.ilike(term))
+            )
+
+        order_col = DocumentRecord.created_at
+        if sort_by == "vendor_name":
+            order_col = DocumentRecord.normalized_vendor_name
+        elif sort_by == "status":
+            order_col = DocumentRecord.status
+
+        if sort_order.lower() == "asc":
+            statement = statement.order_by(order_col.asc(), DocumentRecord.id.asc())
+        else:
+            statement = statement.order_by(order_col.desc(), DocumentRecord.id.desc())
+
+        statement = statement.limit(min(limit, 100)).offset(max(offset, 0))
         return list(self.session.scalars(statement))
+
+    def get_stats(self) -> dict[str, Any]:
+        """Compute summary KPI metrics across all processed documents."""
+        records = list(self.session.scalars(select(DocumentRecord)))
+        total = len(records)
+        needs_review = sum(1 for r in records if r.status == "needs_review")
+        ready = sum(1 for r in records if r.status == "ready")
+        approved = sum(1 for r in records if r.status == "approved")
+        rejected = sum(1 for r in records if r.status == "rejected")
+
+        total_spend = Decimal("0.00")
+        for r in records:
+            if r.status == "approved" and r.review_data:
+                inv_total = r.review_data.get("invoice_total")
+                if inv_total is not None:
+                    try:
+                        total_spend += Decimal(str(inv_total))
+                    except Exception:
+                        pass
+
+        return {
+            "total_documents": total,
+            "needs_review_count": needs_review,
+            "ready_count": ready,
+            "approved_count": approved,
+            "rejected_count": rejected,
+            "total_spend": total_spend,
+            "currency": "EUR",
+        }
 
     def save_result(
         self,
