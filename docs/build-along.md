@@ -375,4 +375,40 @@ uv run --locked --no-sync ruff check app scripts ../playground
 - [x] Search, filter, and pagination parameters in `list()` and `GET /api/documents`.
 - [x] Ruff lint passes across all backend code with zero warnings.
 
+## Operational Dashboard, KPI Metrics, and Interactive Filtering
+
+### Outcome
+
+Elevated the document history view into a portfolio-grade financial review dashboard. Surfaced four live operational KPI summary cards (Total Documents, Needs Review, Ready for Approval, Total Approved Spend in EUR), instant multi-attribute live search (vendor, invoice number, filename), accessible status filter tabs (`All`, `Needs Review`, `Ready`, `Approved`, `Rejected`), and polished empty/deletion states.
+
+### Why this boundary exists
+
+- Operational accountants and finance managers need immediate visibility into review backlogs and approved corporate expenditures without manual calculation.
+- Live client-side and server-side filtering allow users to rapidly locate disputed invoices or audit receipts across large document volumes.
+- Clean separation of UI state (search/filter parameters) from API client calls keeps components reusable and responsive.
+
+### Commands
+
+```bash
+cd frontend
+pnpm exec tsc -b --pretty false
+pnpm lint
+pnpm build
+```
+
+### Observable result
+
+- Navigating to "History" presents 4 styled metric cards displaying real-time document counts and total approved corporate spend in EUR.
+- Typing into the search bar instantly filters documents across vendor names, invoice numbers, and filenames with an accessible clear button.
+- Clicking status filter tabs isolates invoices by state (`Needs Review`, `Ready`, `Approved`, `Rejected`) with dynamic badge counters.
+- Zero-result searches show a contextual empty state with a 1-click "Reset filters" action.
+
+### Checkpoint
+
+- [x] TypeScript interfaces: `DocumentStats` added to `frontend/src/lib/types.ts`.
+- [x] API client: `fetchDocumentStats()` and filtered `listDocuments()` in `frontend/src/lib/api.ts`.
+- [x] Dashboard UI: 4 KPI metric cards, accessible search input, and status filter tabs in `DocumentInbox.tsx`.
+- [x] App orchestration: Integrated live KPI metrics fetching and state synchronization in `App.tsx`.
+- [x] TypeScript typecheck, ESLint, and production Vite build pass with zero errors.
+
 Continue with the [online tutorial](https://learn.datalumina.com/docs/invoice-review).

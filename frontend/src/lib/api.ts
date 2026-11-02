@@ -1,5 +1,5 @@
 import { apiBaseUrl } from './env'
-import type { CorrectionEmail, Document, FieldCorrections, GlAccount } from './types'
+import type { CorrectionEmail, Document, DocumentStats, FieldCorrections, GlAccount } from './types'
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${apiBaseUrl}${path}`, {
@@ -24,8 +24,20 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>
 }
 
-export function listDocuments(): Promise<Document[]> {
-  return request<Document[]>('/api/documents')
+export function listDocuments(params?: { status?: string; search?: string }): Promise<Document[]> {
+  const query = new URLSearchParams()
+  if (params?.status) {
+    query.set('status', params.status)
+  }
+  if (params?.search) {
+    query.set('search', params.search)
+  }
+  const qs = query.toString()
+  return request<Document[]>(`/api/documents${qs ? `?${qs}` : ''}`)
+}
+
+export function fetchDocumentStats(): Promise<DocumentStats> {
+  return request<DocumentStats>('/api/documents/stats')
 }
 
 export function getDocument(id: string): Promise<Document> {

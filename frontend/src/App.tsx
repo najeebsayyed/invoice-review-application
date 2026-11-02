@@ -8,11 +8,12 @@ import { Button } from './components/ui/Button'
 import { Card } from './components/ui/Card'
 import {
   deleteDocument,
+  fetchDocumentStats,
   listDocuments,
   listGlAccounts,
   uploadDocument,
 } from './lib/api'
-import type { Document, GlAccount } from './lib/types'
+import type { Document, DocumentStats, GlAccount } from './lib/types'
 
 type View = 'welcome' | 'upload' | 'processing' | 'result' | 'history'
 
@@ -50,6 +51,7 @@ function App() {
   const [file, setFile] = useState<File | null>(null)
   const [selected, setSelected] = useState<Document | null>(null)
   const [documents, setDocuments] = useState<Document[]>([])
+  const [stats, setStats] = useState<DocumentStats | null>(null)
   const [accounts, setAccounts] = useState<GlAccount[]>([])
   const [accountsLoading, setAccountsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -95,7 +97,12 @@ function App() {
     setError(null)
     setHistoryLoading(true)
     try {
-      setDocuments(await listDocuments())
+      const [docs, fetchedStats] = await Promise.all([
+        listDocuments(),
+        fetchDocumentStats().catch(() => null),
+      ])
+      setDocuments(docs)
+      setStats(fetchedStats)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Could not load review history.')
     } finally {
@@ -136,6 +143,7 @@ function App() {
     try {
       await deleteDocument(next.id)
       setDocuments((current) => current.filter((item) => item.id !== next.id))
+      void fetchDocumentStats().then(setStats).catch(() => {})
       if (selected?.id === next.id) {
         setSelected(null)
       }
@@ -216,17 +224,18 @@ function App() {
               {error}
             </div>
           )}
-          <Card className="mt-6 overflow-hidden">
+          <div className="mt-6">
             {historyLoading ? (
-              <p className="p-12 text-center text-sm text-zinc-500">Loading review history…</p>
+              <Card className="p-12 text-center text-sm text-zinc-500">Loading review history…</Card>
             ) : (
               <DocumentInbox
                 documents={documents}
+                stats={stats}
                 onSelect={showDocument}
                 onDelete={removeHistoryDocument}
               />
             )}
-          </Card>
+          </div>
         </main>
       )}
     </div>

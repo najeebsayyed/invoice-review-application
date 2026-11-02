@@ -85,6 +85,16 @@ export interface AccountingCoding {
   error_message: string | null
 }
 
+export interface DocumentStats {
+  total_documents: number
+  needs_review_count: number
+  ready_count: number
+  approved_count: number
+  rejected_count: number
+  total_spend: number | string
+  currency: string
+}
+
 export interface Document {
   id: string
   original_filename: string
