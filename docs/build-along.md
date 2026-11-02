@@ -48,4 +48,76 @@ cp frontend/.env.example frontend/.env
 - [ ] `./scripts/dev.sh --check` reports that Invoice Review is ready to start.
 - [ ] The health endpoint and starter screen load locally.
 
+## Working slice: Extraction schemas and mapping (invoices & receipts)
+
+### Outcome
+
+Strict, typed Pydantic v2 schemas in `app/schemas/invoice/` and `app/schemas/receipt/` to model Azure AI Document Intelligence extraction for invoices (`prebuilt-invoice`) and receipts (`prebuilt-receipt`). Both schemas support line items, tax breakdowns, confidence scoring, Decimal currency amounts, and unified document aliases.
+
+### Why this boundary exists
+
+Azure SDK objects must not leak across application layers. Isolating the extracted data into explicit Pydantic schemas provides type validation, deterministic field mapping, and safe serialization before passing to finance validation policies.
+
+### Commands
+
+```bash
+cd backend
+uv run --locked --no-sync ruff check app ../playground
+uv run --locked --no-sync python ../playground/run_experiments.py
+uv run --locked --no-sync python ../playground/run_invoice.py 01-en-happy-classic.pdf
+uv run --locked --no-sync python ../playground/run_receipt.py 13-nl-fuel-receipt.png
+```
+
+### Observable result
+
+- `run_experiments.py` runs and passes all 4 verification stages:
+  1. Direct instantiation and alias verification of `InvoiceData` and `ReceiptData`.
+  2. Live extraction of invoice `01-en-happy-classic.pdf` mapped into `InvoiceData`.
+  3. Live extraction of receipt `13-nl-fuel-receipt.png` mapped into `ReceiptData`.
+  4. JSON serialization via `model_dump(mode="json")`.
+
+### Checkpoint
+
+- [x] `app/schemas/invoice/` created with `InvoiceData`, `InvoiceItem`, and `InvoiceTaxDetail`.
+- [x] `app/schemas/receipt/` created with `ReceiptData`, `ReceiptItem`, and `ReceiptTaxDetail`.
+- [x] `DocumentIntelligenceService` updated with `process_receipt` and mapping for both models.
+- [x] Ruff lint passes across `app` and `playground`.
+- [x] Live experiments verify end-to-end extraction and mapping on sample documents.
+
+## Working slice: OpenAI Document Extraction and Classification Service
+
+### Outcome
+
+A typed, structured OpenAIService in pp/services/openai_service.py that mirrors DocumentIntelligenceService by accepting file paths, raw bytes, or binary streams of invoices and receipts (PDF, PNG, JPEG), extracting structured data via OpenAI Responses API, and returning normalized InvoiceData and ReceiptData domain models. Also provides document classification (invoice vs 
+eceipt) and automatic dispatch via process_document.
+
+### Why this boundary exists
+
+OpenAI SDK types and API interactions are encapsulated entirely inside the provider adapter service. Application domain code receives only validated, typed InvoiceData and ReceiptData models with Decimal amounts, parsed dates, and confidence scores, maintaining identical contracts across extraction providers.
+
+### Commands
+
+`ash
+cd backend
+uv run --locked --no-sync ruff check app ../playground
+uv run --locked --no-sync python test.py
+uv run --locked --no-sync python ../playground/run_openai.py 01-en-happy-classic.pdf
+uv run --locked --no-sync python ../playground/run_openai.py 13-nl-fuel-receipt.png
+`
+
+### Observable result
+
+- 	est.py initializes OpenAIService from .env (OPENAI_API_KEY and OPENAI_MODEL) and extracts sample invoice data.
+- 
+un_openai.py classifies the document, extracts structured fields using strict schema responses, and serializes clean JSON adhering to InvoiceData or ReceiptData.
+
+### Checkpoint
+
+- [x] pp/services/openai_service.py created with OpenAIService and OpenAISettings.
+- [x] Unified export in pp/services/__init__.py.
+- [x] Strict structured output parsing for InvoiceData and ReceiptData.
+- [x] Document classification method classify_document.
+- [x] Interactive playground script playground/run_openai.py.
+- [x] Ruff checks pass across pp and playground.
+
 Continue with the [online tutorial](https://learn.datalumina.com/docs/invoice-review).
