@@ -23,16 +23,8 @@ RUN pnpm build
 FROM python:3.12-slim
 WORKDIR /app
 
-# Install system dependencies (curl and certificates for uv installer)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
-    ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install uv package manager
-ADD https://astral.sh/uv/0.6.5/install.sh /uv-installer.sh
-RUN sh /uv-installer.sh && rm /uv-installer.sh
-ENV PATH="/root/.local/bin:$PATH"
+# Install latest uv from official Astral image
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 # Install backend dependencies using locked uv manifest
 WORKDIR /app/backend
