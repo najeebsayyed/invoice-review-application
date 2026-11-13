@@ -31,6 +31,25 @@ def _sync_sqlite_schema(engine: Engine) -> None:
                     conn.execute(
                         text(f"ALTER TABLE documents ADD COLUMN {column.name} {col_type}")
                     )
+            # Ensure workspace indexes exist for fast query isolation
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_documents_workspace_id "
+                    "ON documents (workspace_id)"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_documents_workspace_created "
+                    "ON documents (workspace_id, created_at)"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_documents_workspace_duplicate_key "
+                    "ON documents (workspace_id, normalized_vendor_name, normalized_invoice_number)"
+                )
+            )
             conn.commit()
 
 

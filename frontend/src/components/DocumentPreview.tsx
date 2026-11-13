@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { getWorkspaceId } from '../lib/workspace'
 
 interface DocumentPreviewProps {
   src: string
@@ -21,7 +22,13 @@ export function DocumentPreview({ src, filename, contentType, className = '' }: 
     let active = true
     let createdObjectUrl: string | null = null
 
-    fetch(src, { credentials: 'include' })
+    const headers = new Headers()
+    const workspaceId = getWorkspaceId()
+    if (workspaceId) {
+      headers.set('X-Workspace-ID', workspaceId)
+    }
+
+    fetch(src, { credentials: 'include', headers })
       .then((res) => {
         if (!res.ok) {
           throw new Error(`Failed to load document (${res.status})`)
@@ -70,7 +77,7 @@ export function DocumentPreview({ src, filename, contentType, className = '' }: 
         </p>
         <div className="mt-4 flex items-center gap-2">
           <a
-            href={src}
+            href={previewUrl || src}
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center rounded-md bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-zinc-800"
@@ -78,7 +85,7 @@ export function DocumentPreview({ src, filename, contentType, className = '' }: 
             Open in new tab
           </a>
           <a
-            href={src}
+            href={previewUrl || src}
             download={filename}
             className="inline-flex items-center rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50"
           >

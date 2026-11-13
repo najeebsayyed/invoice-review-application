@@ -5,8 +5,9 @@ from __future__ import annotations
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Annotated
+from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
+from fastapi import APIRouter, Depends, File, Header, HTTPException, Request, UploadFile, status
 from fastapi.responses import FileResponse, Response
 from sqlalchemy.orm import Session
 
@@ -38,6 +39,26 @@ ALLOWED_CONTENT_TYPES = {
     "image/jpeg": ".jpg",
     "image/png": ".png",
 }
+
+
+def get_workspace_id(
+    x_workspace_id: Annotated[str | None, Header(alias="X-Workspace-ID")] = None,
+) -> str:
+    """Extract and validate required anonymous workspace ID from X-Workspace-ID header."""
+    if not x_workspace_id or not x_workspace_id.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="Missing required X-Workspace-ID header.",
+        )
+    candidate = x_workspace_id.strip()
+    try:
+        val = UUID(candidate)
+        return str(val)
+    except (ValueError, AttributeError) as error:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid X-Workspace-ID header format. Must be a valid UUID.",
+        ) from error
 
 
 def get_session(request: Request) -> Iterator[Session]:
@@ -94,15 +115,17 @@ def validate_file_magic_bytes(content: bytes, content_type: str) -> None:
 
 @router.get("/stats", response_model=DocumentStatsResponse)
 def get_document_stats(
+    workspace_id: Annotated[str, Depends(get_workspace_id)],
     repository: Annotated[DocumentRepository, Depends(get_repository)],
 ) -> DocumentStatsResponse:
-    """Retrieve aggregate KPI dashboard statistics across all processed documents."""
-    stats = repository.get_stats()
+    """Retrieve aggregate KPI dashboard statistics for the requesting workspace."""
+    stats = repository.get_stats(workspace_id=workspace_id)
     return DocumentStatsResponse(**stats)
 
 
 @router.get("", response_model=list[DocumentResponse])
 def list_documents(
+    workspace_id: Annotated[str, Depends(get_workspace_id)],
     repository: Annotated[DocumentRepository, Depends(get_repository)],
     status: DocumentStatus | None = None,
     search: str | None = None,
@@ -111,8 +134,9 @@ def list_documents(
     limit: int = 50,
     offset: int = 0,
 ) -> list[DocumentResponse]:
-    """List processed documents with optional filter, search term, sorting, and pagination."""
+    """List processed documents scoped to the requesting workspace."""
     records = repository.list(
+        workspace_id=workspace_id,
         status=status,
         search=search,
         sort_by=sort_by,
@@ -126,13 +150,14 @@ def list_documents(
 @router.get("/{document_id}", response_model=DocumentResponse)
 def get_document(
     document_id: str,
+    workspace_id: Annotated[str, Depends(get_workspace_id)],
     request: Request,
     repository: Annotated[DocumentRepository, Depends(get_repository)],
 ) -> DocumentResponse:
-    """Retrieve full processing details, extraction, validation, and GL coding for a document."""
+    """Retrieve processing details for a document belonging to the workspace."""
     service = build_service(request, repository)
     try:
-        return to_response(service.get(document_id))
+        return to_response(service.get(document_id, workspace_id=workspace_id))
     except DocumentNotFoundError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
 
@@ -140,13 +165,14 @@ def get_document(
 @router.get("/{document_id}/file")
 def get_document_file(
     document_id: str,
+    workspace_id: Annotated[str, Depends(get_workspace_id)],
     request: Request,
     repository: Annotated[DocumentRepository, Depends(get_repository)],
 ) -> FileResponse:
-    """Retrieve original uploaded document binary file (PDF/PNG/JPEG)."""
+    """Retrieve original uploaded binary file for a document belonging to the workspace."""
     service = build_service(request, repository)
     try:
-        record = service.get(document_id)
+        record = service.get(document_id, workspace_id=workspace_id)
     except DocumentNotFoundError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     path = request.app.state.config.upload_dir / Path(record.stored_filename).name
@@ -163,13 +189,14 @@ def get_document_file(
 @router.delete("/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_document(
     document_id: str,
+    workspace_id: Annotated[str, Depends(get_workspace_id)],
     request: Request,
     repository: Annotated[DocumentRepository, Depends(get_repository)],
 ) -> Response:
-    """Delete a document record from SQLite and remove its file from disk."""
+    """Delete a document record and file belonging to the workspace."""
     service = build_service(request, repository)
     try:
-        service.delete(document_id)
+        service.delete(document_id, workspace_id=workspace_id)
     except DocumentNotFoundError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -179,13 +206,18 @@ def delete_document(
 def select_gl_account(
     document_id: str,
     body: AccountingSelectionRequest,
+    workspace_id: Annotated[str, Depends(get_workspace_id)],
     request: Request,
     repository: Annotated[DocumentRepository, Depends(get_repository)],
 ) -> DocumentResponse:
-    """Select or override the Northstar General Ledger account code for a document."""
+    """Select or override GL account code for a document in the workspace."""
     service = build_service(request, repository)
     try:
-        return to_response(service.select_gl_account(document_id, body.gl_account_code))
+        return to_response(
+            service.select_gl_account(
+                document_id, workspace_id=workspace_id, gl_account_code=body.gl_account_code
+            )
+        )
     except DocumentNotFoundError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except DocumentReviewConflictError as error:
@@ -198,13 +230,16 @@ def select_gl_account(
 def decide_document(
     document_id: str,
     body: DecisionRequest,
+    workspace_id: Annotated[str, Depends(get_workspace_id)],
     request: Request,
     repository: Annotated[DocumentRepository, Depends(get_repository)],
 ) -> DocumentResponse:
-    """Record reviewer final decision ('approved' or 'rejected') on a document."""
+    """Record reviewer final decision on a document belonging to the workspace."""
     service = build_service(request, repository)
     try:
-        return to_response(service.decide(document_id, body.decision))
+        return to_response(
+            service.decide(document_id, workspace_id=workspace_id, decision=body.decision)
+        )
     except DocumentNotFoundError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except DocumentReviewConflictError as error:
@@ -217,9 +252,10 @@ def decide_document(
 def upload_document(
     request: Request,
     file: Annotated[UploadFile, File()],
+    workspace_id: Annotated[str, Depends(get_workspace_id)],
     repository: Annotated[DocumentRepository, Depends(get_repository)],
 ) -> DocumentResponse:
-    """Upload a document (PDF, PNG, JPEG, max 4 MB), run pipeline, and record findings in SQLite."""
+    """Upload a document, run pipeline, and record findings scoped to requesting workspace."""
     config: AppConfig = request.app.state.config
     content_type = file.content_type or "application/octet-stream"
     suffix = ALLOWED_CONTENT_TYPES.get(content_type)
@@ -244,6 +280,7 @@ def upload_document(
     service = build_service(request, repository)
     try:
         record = service.process(
+            workspace_id=workspace_id,
             original_filename=original_filename,
             content_type=content_type,
             content=payload,
@@ -261,13 +298,14 @@ def upload_document(
 def apply_corrections(
     document_id: str,
     body: FieldCorrectionRequest,
+    workspace_id: Annotated[str, Depends(get_workspace_id)],
     request: Request,
     repository: Annotated[DocumentRepository, Depends(get_repository)],
 ) -> DocumentResponse:
-    """Apply reviewer corrections to extracted fields and re-run policy validation."""
+    """Apply reviewer corrections to document fields within the requesting workspace."""
     service = build_service(request, repository)
     try:
-        record = service.apply_corrections(document_id, body)
+        record = service.apply_corrections(document_id, workspace_id=workspace_id, corrections=body)
     except DocumentNotFoundError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except DocumentReviewConflictError as error:
@@ -281,13 +319,14 @@ def apply_corrections(
 @router.post("/{document_id}/correction-email", response_model=CorrectionEmailResponse)
 def draft_correction_email(
     document_id: str,
+    workspace_id: Annotated[str, Depends(get_workspace_id)],
     request: Request,
     repository: Annotated[DocumentRepository, Depends(get_repository)],
 ) -> CorrectionEmailResponse:
-    """Generate an on-demand supplier correction email draft using Azure OpenAI."""
+    """Generate an on-demand supplier correction email draft within the workspace."""
     service = build_service(request, repository)
     try:
-        subject, body = service.draft_correction_email(document_id)
+        subject, body = service.draft_correction_email(document_id, workspace_id=workspace_id)
         return CorrectionEmailResponse(subject=subject, body=body)
     except DocumentNotFoundError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error

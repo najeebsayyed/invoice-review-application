@@ -26,9 +26,21 @@ class DocumentRecord(Base):
             "normalized_vendor_name",
             "normalized_invoice_number",
         ),
+        Index(
+            "ix_documents_workspace_created",
+            "workspace_id",
+            "created_at",
+        ),
+        Index(
+            "ix_documents_workspace_duplicate_key",
+            "workspace_id",
+            "normalized_vendor_name",
+            "normalized_invoice_number",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    workspace_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     original_filename: Mapped[str] = mapped_column(String(255))
     stored_filename: Mapped[str] = mapped_column(String(255), unique=True)
     content_type: Mapped[str] = mapped_column(String(100))

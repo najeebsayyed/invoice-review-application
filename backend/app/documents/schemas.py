@@ -59,6 +59,7 @@ class DocumentResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
+    workspace_id: str | None = None
     original_filename: str
     content_type: str
     status: DocumentStatus

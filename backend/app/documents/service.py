@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 
 class DocumentNotFoundError(RuntimeError):
-    """Document record does not exist."""
+    """Document record does not exist or does not belong to the requesting workspace."""
 
     pass
 
@@ -102,12 +102,13 @@ class DocumentService:
     def process(
         self,
         *,
+        workspace_id: str,
         original_filename: str,
         content_type: str,
         content: bytes,
         suffix: str,
     ) -> DocumentRecord:
-        """Process an uploaded document through storage, the pipeline, and SQLite persistence."""
+        """Process an uploaded document through storage, pipeline, and workspace persistence."""
         record_id = str(uuid4())
         stored_filename = f"{record_id}{suffix}"
         self.upload_dir.mkdir(parents=True, exist_ok=True)
@@ -116,13 +117,16 @@ class DocumentService:
 
         self.repository.create_processing(
             record_id=record_id,
+            workspace_id=workspace_id,
             original_filename=original_filename,
             stored_filename=stored_filename,
             content_type=content_type,
         )
 
         try:
-            existing_invoices = self.repository.get_existing_invoices(exclude_id=record_id)
+            existing_invoices = self.repository.get_existing_invoices(
+                workspace_id=workspace_id, exclude_id=record_id
+            )
             pipeline = create_pipeline(existing_invoices=existing_invoices)
             context = pipeline.run_file(stored_path)
         except Exception as error:
@@ -226,11 +230,12 @@ class DocumentService:
             issues=issues,
             vendor_name=vendor_name,
             invoice_number=invoice_number,
+            workspace_id=workspace_id,
         )
 
-    def get(self, record_id: str) -> DocumentRecord:
-        """Fetch a document record or raise DocumentNotFoundError."""
-        record = self.repository.get(record_id)
+    def get(self, record_id: str, workspace_id: str) -> DocumentRecord:
+        """Fetch a document record scoped to the requesting workspace or raise 404."""
+        record = self.repository.get(record_id, workspace_id=workspace_id)
         if record is None:
             raise DocumentNotFoundError(f"Document {record_id} was not found.")
         return record
@@ -238,6 +243,7 @@ class DocumentService:
     def list(
         self,
         *,
+        workspace_id: str,
         status: DocumentStatus | None = None,
         search: str | None = None,
         sort_by: str = "created_at",
@@ -245,8 +251,9 @@ class DocumentService:
         limit: int = 50,
         offset: int = 0,
     ) -> list[DocumentRecord]:
-        """List document records matching search, status filter, and pagination criteria."""
+        """List document records matching search, status filter, and workspace criteria."""
         return self.repository.list(
+            workspace_id=workspace_id,
             status=status,
             search=search,
             sort_by=sort_by,
@@ -255,35 +262,33 @@ class DocumentService:
             offset=offset,
         )
 
-    def get_stats(self) -> dict[str, Any]:
-        """Retrieve aggregated KPI dashboard statistics across all reviews."""
-        return self.repository.get_stats()
+    def get_stats(self, *, workspace_id: str) -> dict[str, Any]:
+        """Retrieve aggregated KPI dashboard statistics across workspace reviews."""
+        return self.repository.get_stats(workspace_id=workspace_id)
 
-    def delete(self, record_id: str) -> None:
-        """Delete document record and associated file on disk."""
-        record = self.repository.get(record_id)
-        if record is None:
-            raise DocumentNotFoundError(f"Document {record_id} was not found.")
+    def delete(self, record_id: str, workspace_id: str) -> None:
+        """Delete document record and associated file on disk within workspace."""
+        record = self.get(record_id, workspace_id=workspace_id)
         stored_path = self.upload_dir / Path(record.stored_filename).name
-        self.repository.delete(record_id)
+        self.repository.delete(record_id, workspace_id=workspace_id)
         stored_path.unlink(missing_ok=True)
 
-    def select_gl_account(self, record_id: str, gl_account_code: str) -> DocumentRecord:
-        """Set user-selected GL account code on the document."""
-        record = self.repository.get(record_id)
-        if record is None:
-            raise DocumentNotFoundError(f"Document {record_id} was not found.")
+    def select_gl_account(
+        self, record_id: str, workspace_id: str, gl_account_code: str
+    ) -> DocumentRecord:
+        """Set user-selected GL account code on the document within workspace."""
+        record = self.get(record_id, workspace_id=workspace_id)
         if record.status in {"approved", "rejected"}:
             raise DocumentReviewConflictError("A decided document cannot be modified.")
         if get_gl_account(gl_account_code) is None:
             raise ValueError(f"Unknown GL account code: '{gl_account_code}'")
-        return self.repository.select_gl_account(record_id, gl_account_code)
+        return self.repository.select_gl_account(
+            record_id, gl_account_code, workspace_id=workspace_id
+        )
 
-    def decide(self, record_id: str, decision: str) -> DocumentRecord:
-        """Record human review approval or rejection."""
-        record = self.repository.get(record_id)
-        if record is None:
-            raise DocumentNotFoundError(f"Document {record_id} was not found.")
+    def decide(self, record_id: str, workspace_id: str, decision: str) -> DocumentRecord:
+        """Record human review approval or rejection within workspace."""
+        record = self.get(record_id, workspace_id=workspace_id)
         if record.status in {"approved", "rejected"}:
             raise DocumentReviewConflictError(
                 "This document has already received a final decision."
@@ -310,13 +315,13 @@ class DocumentService:
         elif decision != "rejected":
             raise ValueError(f"Unsupported decision: '{decision}'")
 
-        return self.repository.set_status(record_id, decision)  # type: ignore[arg-type]
+        return self.repository.set_status(record_id, decision, workspace_id=workspace_id)  # type: ignore[arg-type]
 
     def apply_corrections(
-        self, record_id: str, corrections: FieldCorrectionRequest
+        self, record_id: str, workspace_id: str, corrections: FieldCorrectionRequest
     ) -> DocumentRecord:
-        """Apply reviewer field corrections and recompute deterministic Northstar policy issues."""
-        record = self.get(record_id)
+        """Apply reviewer field corrections and recompute deterministic policy issues."""
+        record = self.get(record_id, workspace_id=workspace_id)
         if record.status in {"approved", "rejected"}:
             raise DocumentReviewConflictError(
                 f"Cannot correct document in final '{record.status}' status."
@@ -344,7 +349,9 @@ class DocumentService:
             )
             new_issues = validate_receipt(rec_data)
         else:
-            existing_invoices = self.repository.get_existing_invoices(exclude_id=record_id)
+            existing_invoices = self.repository.get_existing_invoices(
+                workspace_id=workspace_id, exclude_id=record_id
+            )
             inv_data = InvoiceData(
                 vendor_name=review.vendor_name,
                 vendor_vat_id=review.vendor_vat_id,
@@ -369,11 +376,12 @@ class DocumentService:
             issues=new_issues,
             vendor_name=review.vendor_name,
             invoice_number=review.invoice_number,
+            workspace_id=workspace_id,
         )
 
-    def draft_correction_email(self, record_id: str) -> tuple[str, str]:
+    def draft_correction_email(self, record_id: str, workspace_id: str) -> tuple[str, str]:
         """Draft a formal supplier correction request email using Azure OpenAI."""
-        record = self.get(record_id)
+        record = self.get(record_id, workspace_id=workspace_id)
         review = (
             ReviewData.model_validate(record.review_data)
             if record.review_data

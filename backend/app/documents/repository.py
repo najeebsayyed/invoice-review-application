@@ -38,6 +38,7 @@ class DocumentRepository:
         self,
         *,
         record_id: str,
+        workspace_id: str,
         original_filename: str,
         stored_filename: str,
         content_type: str,
@@ -45,6 +46,7 @@ class DocumentRepository:
         """Create a placeholder document record with 'processing' status."""
         record = DocumentRecord(
             id=record_id,
+            workspace_id=workspace_id,
             original_filename=original_filename,
             stored_filename=stored_filename,
             content_type=content_type,
@@ -56,13 +58,20 @@ class DocumentRepository:
         self.session.refresh(record)
         return record
 
-    def get(self, record_id: str) -> DocumentRecord | None:
-        """Retrieve a document record by ID."""
+    def get(self, record_id: str, workspace_id: str | None = None) -> DocumentRecord | None:
+        """Retrieve a document record by ID, optionally scoped to a workspace."""
+        if workspace_id is not None:
+            statement = select(DocumentRecord).where(
+                DocumentRecord.id == record_id,
+                DocumentRecord.workspace_id == workspace_id,
+            )
+            return self.session.scalar(statement)
         return self.session.get(DocumentRecord, record_id)
 
     def list(
         self,
         *,
+        workspace_id: str,
         status: DocumentStatus | None = None,
         search: str | None = None,
         sort_by: str = "created_at",
@@ -70,8 +79,8 @@ class DocumentRepository:
         limit: int = 50,
         offset: int = 0,
     ) -> list[DocumentRecord]:
-        """List document records with optional filter, search query, sorting, and pagination."""
-        statement = select(DocumentRecord)
+        """List document records scoped to a workspace with optional filters."""
+        statement = select(DocumentRecord).where(DocumentRecord.workspace_id == workspace_id)
 
         if status:
             statement = statement.where(DocumentRecord.status == status)
@@ -98,9 +107,10 @@ class DocumentRepository:
         statement = statement.limit(min(limit, 100)).offset(max(offset, 0))
         return list(self.session.scalars(statement))
 
-    def get_stats(self) -> dict[str, Any]:
-        """Compute summary KPI metrics across all processed documents."""
-        records = list(self.session.scalars(select(DocumentRecord)))
+    def get_stats(self, *, workspace_id: str) -> dict[str, Any]:
+        """Compute summary KPI metrics scoped to a workspace."""
+        statement = select(DocumentRecord).where(DocumentRecord.workspace_id == workspace_id)
+        records = list(self.session.scalars(statement))
         total = len(records)
         needs_review = sum(1 for r in records if r.status == "needs_review")
         ready = sum(1 for r in records if r.status == "ready")
@@ -141,9 +151,10 @@ class DocumentRepository:
         issues: list[ValidationIssue],
         vendor_name: str | None = None,
         invoice_number: str | None = None,
+        workspace_id: str | None = None,
     ) -> DocumentRecord:
         """Save completed pipeline processing outputs to the record."""
-        record = self._require(record_id)
+        record = self._require(record_id, workspace_id=workspace_id)
         record.status = status
         record.classification = classification
         record.extraction = extraction
@@ -160,9 +171,11 @@ class DocumentRepository:
         self._commit(record)
         return record
 
-    def select_gl_account(self, record_id: str, gl_account_code: str) -> DocumentRecord:
+    def select_gl_account(
+        self, record_id: str, gl_account_code: str, *, workspace_id: str | None = None
+    ) -> DocumentRecord:
         """Update reviewer-selected GL account code on the record."""
-        record = self._require(record_id)
+        record = self._require(record_id, workspace_id=workspace_id)
         coding = AccountingCoding.model_validate(record.accounting_coding or {})
         coding.selected_gl_account_code = gl_account_code
         coding.overridden = bool(
@@ -181,9 +194,10 @@ class DocumentRepository:
         issues: list[ValidationIssue],
         vendor_name: str | None = None,
         invoice_number: str | None = None,
+        workspace_id: str | None = None,
     ) -> DocumentRecord:
         """Update document with corrected review data, recomputed issues, and updated status."""
-        record = self._require(record_id)
+        record = self._require(record_id, workspace_id=workspace_id)
         record.status = status
         record.review_data = review_data
         record.issues = [issue.model_dump(mode="json") for issue in issues]
@@ -202,16 +216,18 @@ class DocumentRepository:
         self._commit(record)
         return record
 
-    def set_status(self, record_id: str, status: DocumentStatus) -> DocumentRecord:
+    def set_status(
+        self, record_id: str, status: DocumentStatus, *, workspace_id: str | None = None
+    ) -> DocumentRecord:
         """Transition record status."""
-        record = self._require(record_id)
+        record = self._require(record_id, workspace_id=workspace_id)
         record.status = status
         self._commit(record)
         return record
 
-    def delete(self, record_id: str) -> None:
+    def delete(self, record_id: str, *, workspace_id: str | None = None) -> None:
         """Delete record from database."""
-        record = self._require(record_id)
+        record = self._require(record_id, workspace_id=workspace_id)
         self.session.delete(record)
         self.session.commit()
 
@@ -220,10 +236,12 @@ class DocumentRepository:
         vendor_name: str,
         invoice_number: str,
         *,
+        workspace_id: str,
         exclude_id: str | None = None,
     ) -> bool:
-        """Check if an active document already exists with matching vendor and invoice number."""
+        """Check if an active document already exists in this workspace."""
         statement: Select[tuple[DocumentRecord]] = select(DocumentRecord).where(
+            DocumentRecord.workspace_id == workspace_id,
             DocumentRecord.normalized_vendor_name == normalize_name(vendor_name),
             DocumentRecord.normalized_invoice_number == normalize_invoice_number(invoice_number),
             DocumentRecord.status != "rejected",
@@ -232,12 +250,18 @@ class DocumentRepository:
             statement = statement.where(DocumentRecord.id != exclude_id)
         return self.session.scalar(statement.limit(1)) is not None
 
-    def get_existing_invoices(self, exclude_id: str | None = None) -> list[tuple[str, str]]:
-        """Return list of (vendor_name, invoice_number) for all active invoices in the ledger."""
+    def get_existing_invoices(
+        self,
+        *,
+        workspace_id: str,
+        exclude_id: str | None = None,
+    ) -> list[tuple[str, str]]:
+        """Return list of (vendor_name, invoice_number) for active invoices in this workspace."""
         statement = select(
             DocumentRecord.normalized_vendor_name,
             DocumentRecord.normalized_invoice_number,
         ).where(
+            DocumentRecord.workspace_id == workspace_id,
             DocumentRecord.normalized_vendor_name.is_not(None),
             DocumentRecord.normalized_invoice_number.is_not(None),
             DocumentRecord.status != "rejected",
@@ -247,8 +271,8 @@ class DocumentRepository:
         results = self.session.execute(statement).all()
         return [(str(row[0]), str(row[1])) for row in results if row[0] and row[1]]
 
-    def _require(self, record_id: str) -> DocumentRecord:
-        record = self.get(record_id)
+    def _require(self, record_id: str, workspace_id: str | None = None) -> DocumentRecord:
+        record = self.get(record_id, workspace_id=workspace_id)
         if record is None:
             raise KeyError(record_id)
         return record

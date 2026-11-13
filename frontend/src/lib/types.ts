@@ -97,6 +97,7 @@ export interface DocumentStats {
 
 export interface Document {
   id: string
+  workspace_id?: string | null
   original_filename: string
   content_type: string
   status: DocumentStatus

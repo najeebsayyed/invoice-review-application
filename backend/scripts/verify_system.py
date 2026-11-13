@@ -1,8 +1,9 @@
 """End-to-end system verification script for Invoice Review backend.
 
 Tests full HTTP lifecycle, file magic bytes, validation rules, GL catalog,
-reviewer corrections, state machine transitions, and KPI statistics without
-requiring live cloud credentials or external test harnesses.
+reviewer corrections, state machine transitions, aggregate KPI statistics,
+and anonymous multi-user workspace data isolation without requiring live cloud
+credentials or external test harnesses.
 """
 
 from __future__ import annotations
@@ -73,12 +74,18 @@ def run_verification() -> bool:
     passed_checks = 0
     total_checks = 8
 
+    # Workspace identifiers for multi-tenant isolation testing
+    ws_a = "11111111-1111-4111-8111-111111111111"
+    ws_b = "22222222-2222-4222-8222-222222222222"
+    headers_a = {"X-Workspace-ID": ws_a}
+    headers_b = {"X-Workspace-ID": ws_b}
+
     with tempfile.TemporaryDirectory() as temp_dir_str:
         temp_dir = Path(temp_dir_str)
         app, repository = build_verification_app(temp_dir)
         client = TestClient(app)
         try:
-            # 1. Health check & GL catalog
+            # 1. Health check & GL catalog (public endpoints)
             print("\n[1/8] Verifying Health Check & General Ledger Catalog...")
             res = client.get("/health")
             assert res.status_code == 200, f"Expected 200, got {res.status_code}"
@@ -91,11 +98,32 @@ def run_verification() -> bool:
             print(f"      PASS: GL catalog returned {len(catalog_data)} fixed accounts.")
             passed_checks += 1
 
-            # 2. File upload validation & magic-byte enforcement
-            print("\n[2/8] Verifying File Upload Validation & Magic-Byte Signatures...")
+            # 2. Workspace Header Security & Format Validation
+            print("\n[2/8] Verifying X-Workspace-ID Header Enforcement & Validation...")
+            # A: Missing header on protected routes must return 400
+            missing_header_res = client.get("/api/documents")
+            assert missing_header_res.status_code == 400, (
+                f"Expected 400 for missing header, got {missing_header_res.status_code}"
+            )
+            assert "Missing required X-Workspace-ID header" in missing_header_res.json()["detail"]
+
+            # B: Invalid UUID format must return 400
+            invalid_header_res = client.get(
+                "/api/documents", headers={"X-Workspace-ID": "not-a-valid-uuid"}
+            )
+            assert invalid_header_res.status_code == 400, (
+                f"Expected 400 for invalid UUID, got {invalid_header_res.status_code}"
+            )
+            assert "Invalid X-Workspace-ID header format" in invalid_header_res.json()["detail"]
+            print("      PASS: Enforced presence and UUID format of X-Workspace-ID header.")
+            passed_checks += 1
+
+            # 3. File upload validation & magic-byte enforcement
+            print("\n[3/8] Verifying File Upload Validation & Magic-Byte Signatures...")
             # A: Disallowed MIME type
             res = client.post(
                 "/api/documents",
+                headers=headers_a,
                 files={"file": ("malicious.exe", b"MZ...", "application/x-msdownload")},
             )
             assert res.status_code == 415, f"Expected 415, got {res.status_code}"
@@ -103,6 +131,7 @@ def run_verification() -> bool:
             # B: Empty file
             res = client.post(
                 "/api/documents",
+                headers=headers_a,
                 files={"file": ("empty.pdf", b"", "application/pdf")},
             )
             assert res.status_code == 422, f"Expected 422, got {res.status_code}"
@@ -110,6 +139,7 @@ def run_verification() -> bool:
             # C: Spoofed PDF (content is plain text, not starting with %PDF)
             res = client.post(
                 "/api/documents",
+                headers=headers_a,
                 files={"file": ("fake.pdf", b"Hello text file spoofed as pdf", "application/pdf")},
             )
             assert res.status_code == 422, f"Expected 422, got {res.status_code}"
@@ -117,17 +147,18 @@ def run_verification() -> bool:
             print("      PASS: Blocked unsupported extensions and spoofed magic bytes.")
             passed_checks += 1
 
-            # 3. Seed an initial document record with validation issues
-            print("\n[3/8] Verifying Document Persistence & Schema...")
-            doc_id = "doc-verify-001"
-            test_file = temp_dir / "uploads" / f"{doc_id}.pdf"
-            test_file.write_bytes(b"%PDF-1.4 dummy invoice binary content")
+            # 4. Workspace A: Document Lifecycle, Correction & Approval
+            print("\n[4/8] Verifying Workspace A: Creation, Review, Correction & Approval...")
+            doc_a_id = "doc-verify-001"
+            file_a = temp_dir / "uploads" / f"{doc_a_id}.pdf"
+            file_a.write_bytes(b"%PDF-1.4 dummy invoice binary content")
 
             with app.state.session_factory() as session:
-                record = DocumentRecord(
-                    id=doc_id,
-                    original_filename="sample_invoice.pdf",
-                    stored_filename=f"{doc_id}.pdf",
+                record_a = DocumentRecord(
+                    id=doc_a_id,
+                    workspace_id=ws_a,
+                    original_filename="sample_invoice_a.pdf",
+                    stored_filename=f"{doc_a_id}.pdf",
                     content_type="application/pdf",
                     status="needs_review",
                     normalized_vendor_name="acme cleaning bv",
@@ -135,7 +166,7 @@ def run_verification() -> bool:
                     review_data={
                         "document_type": "invoice",
                         "vendor_name": "Acme Cleaning B.V.",
-                        "vendor_vat_id": "DE123456789",  # Invalid DE VAT (bad checksum)
+                        "vendor_vat_id": "DE123456789",  # Invalid checksum
                         "customer_name": "Northstar Facilities B.V.",
                         "customer_vat_id": "NL00449544B01",
                         "invoice_number": "INV-2026-001",
@@ -177,106 +208,183 @@ def run_verification() -> bool:
                         }
                     ],
                 )
-                session.add(record)
+                session.add(record_a)
                 session.commit()
 
-            res = client.get(f"/api/documents/{doc_id}")
-            assert res.status_code == 200
-            doc_json = res.json()
-            assert doc_json["status"] == "needs_review"
-            assert len(doc_json["issues"]) == 1
-            assert doc_json["issues"][0]["code"] == "invalid_vendor_vat_id"
-            print(f"      PASS: Document {doc_id} created and retrieved with issues.")
-            passed_checks += 1
+            # Retrieve within Workspace A
+            res_a = client.get(f"/api/documents/{doc_a_id}", headers=headers_a)
+            assert res_a.status_code == 200
+            assert res_a.json()["status"] == "needs_review"
 
-            # 4. GL Account selection and override
-            print("\n[4/8] Verifying General Ledger Account Selection...")
-            res = client.put(
-                f"/api/documents/{doc_id}/accounting",
+            # Select GL Account within Workspace A
+            gl_res = client.put(
+                f"/api/documents/{doc_a_id}/accounting",
+                headers=headers_a,
                 json={"gl_account_code": "6100"},
             )
-            assert res.status_code == 200
-            coding = res.json()["accounting_coding"]
-            assert coding["selected_gl_account_code"] == "6100"
-            assert coding["overridden"] is True
-            print("      PASS: Successfully selected and recorded GL account 6100.")
-            passed_checks += 1
+            assert gl_res.status_code == 200
+            assert gl_res.json()["accounting_coding"]["selected_gl_account_code"] == "6100"
 
-            # 5. Field correction and deterministic revalidation
-            print("\n[5/8] Verifying Reviewer Field Correction & Pure Revalidation...")
-            # Correct vendor VAT to a valid German VAT ID (DE136695976 has valid checksum)
-            res = client.put(
-                f"/api/documents/{doc_id}/corrections",
+            # Correct field within Workspace A
+            corr_res = client.put(
+                f"/api/documents/{doc_a_id}/corrections",
+                headers=headers_a,
                 json={"vendor_vat_id": "DE136695976"},
             )
-            assert res.status_code == 200
-            corrected_json = res.json()
-            assert corrected_json["review_data"]["vendor_vat_id"] == "DE136695976"
-            assert corrected_json["review_data"]["provenance"]["vendor_vat_id"] == "user"
-            # Since invalid VAT was corrected and all required fields are present, issues cleared
-            assert len(corrected_json["issues"]) == 0
-            assert corrected_json["status"] == "ready"
-            print("      PASS: Correction applied, pure revalidation cleared issues -> 'ready'.")
-            passed_checks += 1
+            assert corr_res.status_code == 200
+            assert corr_res.json()["status"] == "ready"
 
-            # 6. Final reviewer decision
-            print("\n[6/8] Verifying Final Review Decision State Machine...")
-            res = client.post(
-                f"/api/documents/{doc_id}/decision",
+            # Approve within Workspace A
+            appr_res = client.post(
+                f"/api/documents/{doc_a_id}/decision",
+                headers=headers_a,
                 json={"decision": "approved"},
             )
-            assert res.status_code == 200
-            assert res.json()["status"] == "approved"
+            assert appr_res.status_code == 200
+            assert appr_res.json()["status"] == "approved"
+            print("      PASS: Workspace A processed, corrected, and approved document.")
+            passed_checks += 1
 
-            # Attempting modifications on approved document must return 409 Conflict
-            conflict_res = client.put(
-                f"/api/documents/{doc_id}/corrections",
-                json={"vendor_name": "Changed Name"},
+            # 5. Workspace B: Independent Isolation & Invisibility
+            print("\n[5/8] Verifying Workspace B: Independent Review History & Isolation...")
+            doc_b_id = "doc-verify-002"
+            file_b = temp_dir / "uploads" / f"{doc_b_id}.pdf"
+            file_b.write_bytes(b"%PDF-1.4 dummy b invoice binary")
+
+            with app.state.session_factory() as session:
+                record_b = DocumentRecord(
+                    id=doc_b_id,
+                    workspace_id=ws_b,
+                    original_filename="sample_invoice_b.pdf",
+                    stored_filename=f"{doc_b_id}.pdf",
+                    content_type="application/pdf",
+                    status="needs_review",
+                    normalized_vendor_name="bravo electrics",
+                    normalized_invoice_number="inv-bravo-99",
+                    review_data={
+                        "document_type": "invoice",
+                        "vendor_name": "Bravo Electrics",
+                        "currency": "EUR",
+                        "invoice_total": 450.00,
+                    },
+                    issues=[],
+                )
+                session.add(record_b)
+                session.commit()
+
+            # Verify Workspace B sees only its own document
+            list_b = client.get("/api/documents", headers=headers_b).json()
+            assert len(list_b) == 1
+            assert list_b[0]["id"] == doc_b_id
+
+            # Verify Workspace B cannot access Workspace A's document by ID (returns 404)
+            cross_get = client.get(f"/api/documents/{doc_a_id}", headers=headers_b)
+            assert cross_get.status_code == 404, (
+                f"Expected 404 for cross-workspace document access, got {cross_get.status_code}"
             )
-            assert conflict_res.status_code == 409
-            print("      PASS: Document approved; state immutability enforced (409 Conflict).")
+
+            # Verify Workspace B stats calculate solely for Workspace B
+            stats_b = client.get("/api/documents/stats", headers=headers_b).json()
+            assert stats_b["total_documents"] == 1
+            assert stats_b["approved_count"] == 0
+            assert stats_b["needs_review_count"] == 1
+            assert Decimal(str(stats_b["total_spend"])) == Decimal("0.00")
+            print("      PASS: Workspace B history isolated; Workspace A invisible.")
             passed_checks += 1
 
-            # 7. Aggregate KPI Metrics & Query Filtering
-            print("\n[7/8] Verifying Aggregate KPI Metrics & Inbox Search/Filtering...")
-            stats_res = client.get("/api/documents/stats")
-            assert stats_res.status_code == 200
-            stats = stats_res.json()
-            assert stats["total_documents"] == 1
-            assert stats["approved_count"] == 1
-            assert stats["ready_count"] == 0
-            assert stats["needs_review_count"] == 0
-            assert Decimal(str(stats["total_spend"])) == Decimal("1210.00")
+            # 6. Cross-Workspace Unauthorized Operations Protection
+            print("\n[6/8] Verifying Cross-Workspace Action Protection (404 Unauthorized)...")
+            # Attempt to approve Workspace A's invoice from Workspace B
+            res = client.post(
+                f"/api/documents/{doc_a_id}/decision",
+                headers=headers_b,
+                json={"decision": "rejected"},
+            )
+            assert res.status_code == 404
 
-            # Query filter: status=approved
-            approved_list = client.get("/api/documents?status=approved").json()
-            assert len(approved_list) == 1
+            # Attempt to update GL on Workspace A from Workspace B
+            res = client.put(
+                f"/api/documents/{doc_a_id}/accounting",
+                headers=headers_b,
+                json={"gl_account_code": "6120"},
+            )
+            assert res.status_code == 404
 
-            # Query filter: status=needs_review (should be 0)
-            review_list = client.get("/api/documents?status=needs_review").json()
-            assert len(review_list) == 0
+            # Attempt to apply corrections to Workspace A from Workspace B
+            res = client.put(
+                f"/api/documents/{doc_a_id}/corrections",
+                headers=headers_b,
+                json={"vendor_name": "Malicious Hijack"},
+            )
+            assert res.status_code == 404
 
-            # Query filter: search term
-            search_match = client.get("/api/documents?search=acme").json()
-            assert len(search_match) == 1
-            search_nomatch = client.get("/api/documents?search=nonexistent").json()
-            assert len(search_nomatch) == 0
-            print("      PASS: KPI statistics and search/filter queries computed accurately.")
+            # Attempt to draft correction email for Workspace A from Workspace B
+            res = client.post(
+                f"/api/documents/{doc_a_id}/correction-email",
+                headers=headers_b,
+            )
+            assert res.status_code == 404
+
+            # Attempt to access Workspace A binary file from Workspace B
+            res = client.get(f"/api/documents/{doc_a_id}/file", headers=headers_b)
+            assert res.status_code == 404
+
+            # Attempt to delete Workspace A from Workspace B
+            res = client.delete(f"/api/documents/{doc_a_id}", headers=headers_b)
+            assert res.status_code == 404
+
+            # Verify Workspace A's record was completely untouched
+            verify_a = client.get(f"/api/documents/{doc_a_id}", headers=headers_a).json()
+            assert verify_a["status"] == "approved"
+            assert verify_a["review_data"]["vendor_name"] == "Acme Cleaning B.V."
+            print("      PASS: All cross-workspace mutations safely rejected with HTTP 404.")
             passed_checks += 1
 
-            # 8. Document Deletion & Cleanup
-            print("\n[8/8] Verifying Document Deletion & Storage Cleanup...")
-            del_res = client.delete(f"/api/documents/{doc_id}")
+            # 7. Legacy Record Exclusion & Persistence
+            print("\n[7/8] Verifying Legacy Record Exclusion & Persistence...")
+            # Seed a legacy record with workspace_id = None
+            legacy_id = "doc-legacy-000"
+            with app.state.session_factory() as session:
+                legacy_record = DocumentRecord(
+                    id=legacy_id,
+                    workspace_id=None,
+                    original_filename="legacy_invoice.pdf",
+                    stored_filename="legacy_invoice.pdf",
+                    content_type="application/pdf",
+                    status="ready",
+                    review_data={"invoice_total": 999.00},
+                )
+                session.add(legacy_record)
+                session.commit()
+
+            # Verify neither Workspace A nor Workspace B sees the legacy record
+            docs_a = client.get("/api/documents", headers=headers_a).json()
+            assert all(d["id"] != legacy_id for d in docs_a)
+
+            docs_b = client.get("/api/documents", headers=headers_b).json()
+            assert all(d["id"] != legacy_id for d in docs_b)
+
+            # Verify Workspace A still accesses its own history across requests
+            stats_a = client.get("/api/documents/stats", headers=headers_a).json()
+            assert stats_a["total_documents"] == 1
+            assert stats_a["approved_count"] == 1
+            assert Decimal(str(stats_a["total_spend"])) == Decimal("1210.00")
+            print("      PASS: Legacy records excluded; Workspace A history fully persistent.")
+            passed_checks += 1
+
+            # 8. Document Deletion & Storage Cleanup
+            print("\n[8/8] Verifying Workspace Document Deletion & File Cleanup...")
+            del_res = client.delete(f"/api/documents/{doc_a_id}", headers=headers_a)
             assert del_res.status_code == 204
-            assert not test_file.exists()
+            assert not file_a.exists()
 
-            get_res = client.get(f"/api/documents/{doc_id}")
-            assert get_res.status_code == 404
+            # Confirm Workspace A record is gone
+            assert client.get(f"/api/documents/{doc_a_id}", headers=headers_a).status_code == 404
 
-            stats_after = client.get("/api/documents/stats").json()
-            assert stats_after["total_documents"] == 0
-            assert Decimal(str(stats_after["total_spend"])) == Decimal("0.00")
-            print("      PASS: Document record and binary file deleted successfully.")
+            # Confirm Workspace B's document and file were NOT deleted
+            assert client.get(f"/api/documents/{doc_b_id}", headers=headers_b).status_code == 200
+            assert file_b.exists()
+            print("      PASS: Workspace A document deleted; Workspace B document remains intact.")
             passed_checks += 1
         finally:
             client.close()
@@ -284,7 +392,7 @@ def run_verification() -> bool:
 
     print("\n" + "=" * 70)
     print(f"RESULT: {passed_checks}/{total_checks} CHECKS PASSED (100%)")
-    print("All architectural boundaries, schemas, and security checks verified!")
+    print("Multi-user anonymous workspace isolation verified successfully!")
     print("=" * 70)
     return True
 

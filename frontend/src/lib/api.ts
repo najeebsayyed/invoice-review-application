@@ -1,9 +1,17 @@
 import { apiBaseUrl } from './env'
 import type { CorrectionEmail, Document, DocumentStats, FieldCorrections, GlAccount } from './types'
+import { getWorkspaceId } from './workspace'
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers = new Headers(init?.headers)
+  const workspaceId = getWorkspaceId()
+  if (workspaceId) {
+    headers.set('X-Workspace-ID', workspaceId)
+  }
+
   const response = await fetch(`${apiBaseUrl}${path}`, {
     ...init,
+    headers,
     credentials: 'include',
   })
   if (!response.ok) {
@@ -90,4 +98,21 @@ export function draftCorrectionEmail(id: string): Promise<CorrectionEmail> {
 
 export function documentFileUrl(id: string): string {
   return `${apiBaseUrl}/api/documents/${encodeURIComponent(id)}/file`
+}
+
+export async function fetchDocumentBlob(id: string): Promise<Blob> {
+  const headers = new Headers()
+  const workspaceId = getWorkspaceId()
+  if (workspaceId) {
+    headers.set('X-Workspace-ID', workspaceId)
+  }
+
+  const response = await fetch(`${apiBaseUrl}/api/documents/${encodeURIComponent(id)}/file`, {
+    headers,
+    credentials: 'include',
+  })
+  if (!response.ok) {
+    throw new Error(`Failed to load document (${response.status})`)
+  }
+  return response.blob()
 }
