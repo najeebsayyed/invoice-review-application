@@ -1,0 +1,15 @@
+.git
+.github
+.venv
+__pycache__
+*.pyc
+backend/data
+backend/uploads
+backend/.venv
+frontend/node_modules
+frontend/dist
+docs
+.ruff_cache
+.pytest_cache
+*.log
+.DS_Store
