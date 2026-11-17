@@ -2,8 +2,7 @@
 
 An enterprise-grade, Human-in-the-Loop (HITL) Financial Document Processing and Accounting Coding Platform built for Northstar Facilities B.V. Combines Azure AI Document Intelligence, Azure OpenAI structured reasoning, pure deterministic European VAT validation, and a high-performance React interface deployed natively on Microsoft Azure.
 
-🌐 **Live Production Application**: **[https://invoice-review-app.najeebsayyed.in/](https://invoice-review-app.najeebsayyed.in/)**  
-🚀 **Live Backend API**: **[https://invoice-review-api.greenmushroom-2b5a71a4.centralindia.azurecontainerapps.io/health](https://invoice-review-api.greenmushroom-2b5a71a4.centralindia.azurecontainerapps.io/health)**
+🌐 **Live Production Application**: **[https://invoice-review-app.najeebsayyed.in/](https://invoice-review-app.najeebsayyed.in/)**
 
 ---
 
@@ -405,6 +404,6 @@ pnpm run build
 ## Author & Contact
 
 **Najeeb Sayyed**  
-- **Portfolio & Custom Domain**: [https://invoice-review-app.najeebsayyed.in](https://invoice-review-app.najeebsayyed.in)  
-- **GitHub**: [@najeebsayyed](https://github.com/najeebsayyed)  
-- **LinkedIn**: [Najeeb Sayyed](https://linkedin.com/in/najeebsayyed)
+- **Portfolio**: [https://najeebsayyed.in/](https://najeebsayyed.in/)  
+- **LinkedIn**: [linkedin.com/in/najeebsayyed](https://linkedin.com/in/najeebsayyed)  
+- **GitHub**: [@najeebsayyed](https://github.com/najeebsayyed)
