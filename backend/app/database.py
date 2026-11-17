@@ -15,11 +15,26 @@ class Base(DeclarativeBase):
 
 
 def normalize_database_url(url: str) -> str:
-    """Normalize database connection string for SQLAlchemy 2.0 dialects."""
+    """Normalize database connection string for SQLAlchemy 2.0 dialects with driver fallback."""
     if url.startswith("postgres://"):
-        return url.replace("postgres://", "postgresql+psycopg://", 1)
-    if url.startswith("postgresql://") and not url.startswith("postgresql+"):
-        return url.replace("postgresql://", "postgresql+psycopg://", 1)
+        url = url.replace("postgres://", "postgresql://", 1)
+
+    # Check whether psycopg is available and functional (native C library)
+    psycopg_available = False
+    try:
+        import psycopg.pq  # noqa: F401
+
+        psycopg_available = True
+    except Exception:
+        psycopg_available = False
+
+    if url.startswith("postgresql://"):
+        driver = "postgresql+psycopg://" if psycopg_available else "postgresql+pg8000://"
+        return url.replace("postgresql://", driver, 1)
+
+    if url.startswith("postgresql+psycopg://") and not psycopg_available:
+        return url.replace("postgresql+psycopg://", "postgresql+pg8000://", 1)
+
     return url
 
 
