@@ -14,8 +14,13 @@ RUN uv sync --locked --no-dev --no-install-project
 # Copy backend application source code
 COPY . ./
 
-# Create runtime directory for data and uploads
-RUN mkdir -p /app/backend/data/uploads
+# Create non-root system user and configure directory permissions
+RUN groupadd -r appuser && useradd -r -g appuser -u 10001 -d /app appuser \
+    && mkdir -p /app/backend/data/uploads \
+    && chown -R appuser:appuser /app
+
+# Switch to non-root execution
+USER appuser
 
 # Azure Container Apps injects PORT (defaults to 8000)
 ENV PORT=8000

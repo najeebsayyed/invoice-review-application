@@ -37,11 +37,16 @@ COPY backend/ ./
 # Copy compiled frontend from Stage 1 into /app/frontend/dist
 COPY --from=frontend-builder /app/frontend/dist /app/frontend/dist
 
-# Create runtime directories for SQLite database and document uploads
-RUN mkdir -p /app/backend/data/uploads
+# Create runtime directories and non-root system user
+RUN groupadd -r appuser && useradd -r -g appuser -u 10001 -d /app appuser \
+    && mkdir -p /app/backend/data/uploads \
+    && chown -R appuser:appuser /app
 
-# Render injects $PORT dynamically (defaults to 8000 locally)
+# Switch to non-root execution
+USER appuser
+
+# Render / Container Apps injects $PORT dynamically (defaults to 8000 locally)
 ENV PORT=8000
 EXPOSE 8000
 
-CMD ["sh", "-c", "uv run --locked --no-sync uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+CMD ["sh", "-c", "uv run --locked --no-sync python -m uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

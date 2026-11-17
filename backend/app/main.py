@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -76,11 +76,26 @@ def create_app() -> FastAPI:
             "FastAPI service for invoice & receipt processing, validation against "
             "Northstar policy, and General Ledger account suggestion."
         ),
+        docs_url="/docs" if settings.enable_api_docs else None,
+        redoc_url="/redoc" if settings.enable_api_docs else None,
+        openapi_url="/openapi.json" if settings.enable_api_docs else None,
     )
     app.state.config = config
     app.state.engine = engine
     app.state.session_factory = session_factory
     app.state.storage = storage
+
+    @app.middleware("http")
+    async def add_security_headers(request: Request, call_next) -> Response:
+        """Inject production security headers and remove server fingerprint."""
+        response: Response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        if "server" in response.headers:
+            del response.headers["server"]
+        return response
 
     app.add_middleware(
         CORSMiddleware,

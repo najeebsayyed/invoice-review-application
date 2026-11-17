@@ -24,7 +24,8 @@ service = OpenAIService()
 print(f"OpenAI service initialized successfully using model: {service.model}")
 
 # Run a quick extraction test on the sample invoice if available
-sample_invoice = Path(__file__).resolve().parents[1] / "samples" / "generated" / "01-en-happy-classic.pdf"
+samples_dir = Path(__file__).resolve().parents[1] / "samples" / "generated"
+sample_invoice = samples_dir / "01-en-happy-classic.pdf"
 if sample_invoice.is_file():
     print(f"\nExtracting sample invoice: {sample_invoice.name}...")
     invoice = service.process_invoice(sample_invoice)

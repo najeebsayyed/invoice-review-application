@@ -51,6 +51,8 @@ class Settings(BaseSettings):
     azure_storage_container_name: str = "invoices"
     port: int = 8000
     host: str = "0.0.0.0"
+    enable_api_docs: bool = False
+
 
     @property
     def cors_origins(self) -> list[str]:

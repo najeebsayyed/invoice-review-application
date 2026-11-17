@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import logging
+import threading
+import time
+from collections import defaultdict
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Annotated
@@ -33,6 +37,8 @@ from app.documents.service import (
 from app.invoices.validation import ValidationIssue
 from app.storage import StorageBackend
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/api/documents", tags=["documents"])
 
 ALLOWED_CONTENT_TYPES = {
@@ -40,6 +46,29 @@ ALLOWED_CONTENT_TYPES = {
     "image/jpeg": ".jpg",
     "image/png": ".png",
 }
+
+# In-memory sliding window rate limiter for expensive AI extraction endpoints
+_UPLOAD_RATE_LIMIT = 10  # maximum uploads per window
+_UPLOAD_WINDOW_SECONDS = 60.0  # 60 second window
+_upload_history: dict[str, list[float]] = defaultdict(list)
+_rate_limit_lock = threading.Lock()
+
+
+def check_upload_rate_limit(key: str) -> None:
+    """Enforce request limits on resource-intensive document processing endpoints."""
+    now = time.monotonic()
+    with _rate_limit_lock:
+        timestamps = [t for t in _upload_history[key] if now - t < _UPLOAD_WINDOW_SECONDS]
+        if len(timestamps) >= _UPLOAD_RATE_LIMIT:
+            _upload_history[key] = timestamps
+            raise HTTPException(
+                status_code=429,
+                detail="Too many document uploads. Please wait before submitting another document.",
+                headers={"Retry-After": "60"},
+            )
+        timestamps.append(now)
+        _upload_history[key] = timestamps
+
 
 
 def get_workspace_id(
@@ -275,6 +304,9 @@ def upload_document(
     repository: Annotated[DocumentRepository, Depends(get_repository)],
 ) -> DocumentResponse:
     """Upload a document, run pipeline, and record findings scoped to requesting workspace."""
+    rate_limit_key = f"{workspace_id}:{request.client.host if request.client else 'unknown'}"
+    check_upload_rate_limit(rate_limit_key)
+
     config: AppConfig = request.app.state.config
     content_type = file.content_type or "application/octet-stream"
     suffix = ALLOWED_CONTENT_TYPES.get(content_type)
@@ -330,7 +362,10 @@ def apply_corrections(
     except DocumentReviewConflictError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
     except Exception as error:
-        raise HTTPException(status_code=500, detail=str(error)) from error
+        logger.exception("Unexpected error applying corrections for %s", document_id)
+        raise HTTPException(
+            status_code=500, detail="An internal error occurred while processing the request."
+        ) from error
 
     return to_response(record)
 
@@ -350,4 +385,7 @@ def draft_correction_email(
     except DocumentNotFoundError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except Exception as error:
-        raise HTTPException(status_code=500, detail=str(error)) from error
+        logger.exception("Unexpected error drafting correction email for %s", document_id)
+        raise HTTPException(
+            status_code=500, detail="An internal error occurred while processing the request."
+        ) from error
