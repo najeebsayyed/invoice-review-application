@@ -1,229 +1,135 @@
-# Azure Deployment Guide: Invoice Review AI
+# Azure Infrastructure & Deployment Status: Invoice Review AI
 
-This guide documents the exact deployment procedure for the **Invoice Review AI** application to **Microsoft Azure** using your **Azure for Students** subscription, maximizing free-tier allowances and keeping monthly costs at **\$0** or pennies.
-
----
-
-## 1. Discovered & Target Infrastructure Architecture
-
-| Component | Azure Service | Discovered / Target Name | Tier / SKU | Notes |
-| :--- | :--- | :--- | :--- | :--- |
-| **Subscription** | Azure for Students | `Azure for Students` | Active | 1-year student credit & services |
-| **Resource Group** | Resource Group | `rg-invoice-review` | Standard | Located in `centralindia` |
-| **Database Server** | Azure Database for PostgreSQL | `invoice-review-db` | Burstable `Standard_B1ms` (32 GB) | Flexible Server v16 in `centralindia` |
-| **Application DB** | PostgreSQL Database | `invoice_review` | UTF-8, en_US.utf8 | Created and verified |
-| **Admin User** | PostgreSQL Admin | `Najeeb` | Password Auth | SSL enforced (`sslmode=require`) |
-| **Frontend** | Azure Static Web Apps | `invoice-review-frontend` | **Free Tier** | Custom domain & auto-renewing SSL |
-| **Custom Domain** | DNS (Cloudflare / Namecheap) | `invoice-review-app.najeebsayyed.in` | CNAME record | Automatic DigiCert SSL certificate |
-| **Backend API** | Azure Container Apps | `invoice-review-api` | **Consumption (Serverless)** | 0 to 2 replicas (scales to \$0 when idle) |
-| **Container Registry** | Azure Container Registry | `acrinvoicereview` (or custom) | **Basic** | Builds and hosts container image |
-| **File Storage** | Azure Blob Storage | `stginvoicereview` (or local disk) | Standard LRS | For persistent invoice storage |
-| **AI Extraction** | Azure Document Intelligence | Existing instance | Free / S0 | Prebuilt invoice & receipt models |
-| **AI Review** | OpenAI / Azure OpenAI | Existing API key | `gpt-5.6-terra` | Structured document review |
+This document records the **active deployed Azure infrastructure** and provides the remaining steps for frontend deployment and custom domain setup.
 
 ---
 
-## 2. PostgreSQL Connection & Local Setup
+## 1. Live Infrastructure Overview
 
-### Connection String Format
+| Component | Azure Resource Name | Type / SKU | Live Endpoint / Value |
+| :--- | :--- | :--- | :--- |
+| **Subscription** | Azure for Students | Enabled | Active 1-year student benefit |
+| **Resource Group** | `rg-invoice-review` | Standard | Location: `centralindia` |
+| **PostgreSQL Server** | `invoice-review-db` | Burstable `Standard_B1ms` (32 GB) | `invoice-review-db.postgres.database.azure.com:5432` |
+| **Application DB** | `invoice_review` | UTF-8, en_US.utf8 | Verified with `documents` schema |
+| **Container Registry** | `acrinvoicereview` | Basic SKU | `acrinvoicereview.azurecr.io` |
+| **Container Apps Env** | `env-invoice-review` | Serverless / Consumption | Central India (`greenmushroom-2b5a71a4`) |
+| **Backend API** | `invoice-review-api` | 0.25 vCPU, 0.5 GiB (0–2 replicas) | **`https://invoice-review-api.greenmushroom-2b5a71a4.centralindia.azurecontainerapps.io`** |
+| **Blob Storage** | `stginvoicereview` | Standard LRS (Hot) | Private container: `invoices` |
+| **Frontend** | `invoice-review-frontend` | Azure Static Web Apps (Free) | *(Ready for deployment once pushed)* |
+| **Custom Domain** | `invoice-review-app.najeebsayyed.in` | CNAME via Cloudflare | *(Ready for DNS validation)* |
 
-```text
-postgresql+psycopg://Najeeb:<PASSWORD>@invoice-review-db.postgres.database.azure.com:5432/invoice_review?sslmode=require
+---
+
+## 2. Backend Health & Verification
+
+The live backend has been verified in Azure:
+```bash
+# Health check
+curl -i "https://invoice-review-api.greenmushroom-2b5a71a4.centralindia.azurecontainerapps.io/health"
+# Status: HTTP 200 OK {"status": "ok"}
+
+# General Ledger Accounts
+curl -s "https://invoice-review-api.greenmushroom-2b5a71a4.centralindia.azurecontainerapps.io/api/accounting/gl-accounts"
+# Returns all 10 Northstar General Ledger accounts
+
+# Workspace-Scoped Query (Live PostgreSQL Flexible Server)
+curl -s -H "X-Workspace-ID: 11111111-1111-4111-8111-111111111111" "https://invoice-review-api.greenmushroom-2b5a71a4.centralindia.azurecontainerapps.io/api/documents"
+# Returns []
 ```
 
-> **Security Notice:** The password must never be committed to Git, printed to console logs, or shared in chats.
+---
 
-### Automated Local Database Setup & Migration
+## 3. Remaining Frontend Deployment Steps
 
-A dedicated setup script is provided in the repository to safely prompt for your database password, verify SSL connectivity, create all SQLAlchemy tables in `invoice_review`, verify CRUD operations, and write `DATABASE_URL` to your ignored `backend/.env` file:
+Your backend is live and waiting. Follow these simple steps to deploy your frontend and attach your custom domain:
 
+### Step 1: Review and Push Changes to GitHub
+
+Review your changes and push them to your repository:
 ```powershell
-cd backend
-uv run --locked --no-sync python scripts/setup_postgres.py
+git add .
+git commit -m "feat: complete Azure cloud deployment for backend API"
+git push origin main
 ```
 
 ---
 
-## 3. Step-by-Step Deployment Walkthrough
+### Step 2: Deploy Frontend to Azure Static Web Apps (Free Tier)
 
-### Step 1: Azure Container Registry (ACR) Setup
+You can deploy the frontend via the **Azure Portal** (recommended with GitHub Actions) or via **Azure CLI**:
 
-```bash
-# 1. Variables
-RESOURCE_GROUP="rg-invoice-review"
-LOCATION="centralindia"
-ACR_NAME="acrinvoicereview$RANDOM"
+#### Option A: GitHub Actions via Azure Portal (Continuous Deployment)
+1. In the [Azure Portal](https://portal.azure.com), search for **Static Web Apps** and click **+ Create**.
+2. Select:
+   - **Subscription:** `Azure for Students`
+   - **Resource Group:** `rg-invoice-review`
+   - **Name:** `invoice-review-frontend`
+   - **Plan type:** `Free`
+   - **Region:** `Central India` (or nearest available)
+3. Under **Deployment details**:
+   - Source: **GitHub** (sign in and select your repository `invoice-review`, branch `main`).
+   - Build Presets: **Custom**
+   - **App location:** `/frontend`
+   - **Api location:** *(leave empty)*
+   - **Output location:** `dist`
+4. Click **Review + create**, then **Create**.
+5. Once created, in the Azure Portal open your Static Web App -> **Environment variables** (or in GitHub repo secrets):
+   - Add: `VITE_API_BASE_URL` = `https://invoice-review-api.greenmushroom-2b5a71a4.centralindia.azurecontainerapps.io`
+   - Save. GitHub Actions will build and deploy your site in ~1 minute.
 
-# 2. Create ACR (Basic SKU)
-az acr create \
-  --resource-group $RESOURCE_GROUP \
-  --name $ACR_NAME \
-  --sku Basic \
-  --admin-enabled true
-
-# 3. Retrieve ACR Credentials
-ACR_USERNAME=$(az acr credential show --name $ACR_NAME --query username -o tsv)
-ACR_PASSWORD=$(az acr credential show --name $ACR_NAME --query "passwords[0].value" -o tsv)
-ACR_LOGIN_SERVER=$(az acr show --name $ACR_NAME --query loginServer -o tsv)
-
-# 4. Build and Push Backend Image using Azure Cloud Build (no local Docker required)
-az acr build \
-  --registry $ACR_NAME \
-  --image invoice-review-backend:latest \
-  --file backend/Dockerfile \
-  backend/
-```
-
----
-
-### Step 2: Azure Blob Storage (Document Persistence in Cloud)
-
-Azure Container Apps containers have ephemeral disks. Persistent documents are stored in Azure Blob Storage:
-
-```bash
-STORAGE_ACCOUNT="stginvoicereview$RANDOM"
-
-# 1. Create Storage Account (Standard LRS)
-az storage account create \
-  --name $STORAGE_ACCOUNT \
-  --resource-group $RESOURCE_GROUP \
-  --location $LOCATION \
-  --sku Standard_LRS \
-  --kind StorageV2 \
-  --allow-blob-public-access false
-
-# 2. Retrieve Connection String
-AZURE_STORAGE_CONNECTION_STRING=$(az storage account show-connection-string \
-  --name $STORAGE_ACCOUNT \
-  --resource-group $RESOURCE_GROUP \
-  --query connectionString -o tsv)
-
-# 3. Create Private Container
-az storage container create \
-  --name invoices \
-  --connection-string "$AZURE_STORAGE_CONNECTION_STRING"
-```
-
----
-
-### Step 3: Configure Database Firewall for Azure Container Apps
-
-Allow Azure services to connect to PostgreSQL:
-
-```bash
-az postgres flexible-server firewall-rule create \
-  --resource-group $RESOURCE_GROUP \
-  --server-name invoice-review-db \
-  --name AllowAllAzureServices \
-  --start-ip-address 0.0.0.0 \
-  --end-ip-address 0.0.0.0
-```
-
-*(Note: `0.0.0.0` to `0.0.0.0` is the special Azure rule that enables internal Azure-to-Azure communication between Azure Container Apps and PostgreSQL, without opening the server to the public internet).*
-
----
-
-### Step 4: Deploy Backend to Azure Container Apps (Consumption Tier)
-
-```bash
-CONTAINER_APP_ENV="env-invoice-review"
-CONTAINER_APP_NAME="invoice-review-api"
-
-# 1. Create Managed Environment
-az containerapp env create \
-  --name $CONTAINER_APP_ENV \
-  --resource-group $RESOURCE_GROUP \
-  --location $LOCATION
-
-# 2. Deploy Container App with Autoscaling (0 to 2 replicas for $0 idle cost)
-az containerapp create \
-  --name $CONTAINER_APP_NAME \
-  --resource-group $RESOURCE_GROUP \
-  --environment $CONTAINER_APP_ENV \
-  --image "${ACR_LOGIN_SERVER}/invoice-review-backend:latest" \
-  --registry-server $ACR_LOGIN_SERVER \
-  --registry-username $ACR_USERNAME \
-  --registry-password "$ACR_PASSWORD" \
-  --target-port 8000 \
-  --ingress external \
-  --min-replicas 0 \
-  --max-replicas 2 \
-  --cpu 0.25 \
-  --memory 0.5Gi \
-  --env-vars \
-    PORT="8000" \
-    ALLOWED_ORIGINS="http://localhost:5173,http://localhost:4173,https://invoice-review-app.najeebsayyed.in" \
-    DATABASE_URL="postgresql+psycopg://Najeeb:<PASSWORD>@invoice-review-db.postgres.database.azure.com:5432/invoice_review?sslmode=require" \
-    AZURE_STORAGE_CONNECTION_STRING="$AZURE_STORAGE_CONNECTION_STRING" \
-    AZURE_STORAGE_CONTAINER_NAME="invoices" \
-    AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT="<your-endpoint>" \
-    AZURE_DOCUMENT_INTELLIGENCE_KEY="<your-key>" \
-    OPENAI_API_KEY="<your-openai-key>" \
-    OPENAI_MODEL="gpt-5.6-terra"
-
-# 3. Get Backend Public URL
-BACKEND_URL=$(az containerapp show \
-  --name $CONTAINER_APP_NAME \
-  --resource-group $RESOURCE_GROUP \
-  --query properties.configuration.ingress.fqdn -o tsv)
-
-echo "Backend Live at: https://${BACKEND_URL}"
-curl -s "https://${BACKEND_URL}/health"
-```
-
----
-
-### Step 5: Deploy Frontend to Azure Static Web Apps (Free Tier)
-
-```bash
-# 1. Build Frontend Locally with Backend FQDN
-cd frontend
-export VITE_API_BASE_URL="https://${BACKEND_URL}"
-pnpm build
-cd ..
-
-# 2. Create Static Web App Resource
-az staticwebapp create \
-  --name "invoice-review-frontend" \
-  --resource-group $RESOURCE_GROUP \
-  --location $LOCATION \
+#### Option B: Deploy via Azure CLI (Immediate Local Deploy)
+```powershell
+# 1. Create Static Web App resource in Azure
+az staticwebapp create `
+  --name "invoice-review-frontend" `
+  --resource-group "rg-invoice-review" `
+  --location "centralindia" `
   --sku Free
 
-# 3. Retrieve Deployment Token
-SWA_TOKEN=$(az staticwebapp secrets list \
-  --name "invoice-review-frontend" \
-  --resource-group $RESOURCE_GROUP \
+# 2. Retrieve Deployment Token
+$SWA_TOKEN = (az staticwebapp secrets list `
+  --name "invoice-review-frontend" `
+  --resource-group "rg-invoice-review" `
   --query properties.apiKey -o tsv)
 
-# 4. Deploy using Azure SWA CLI
-npx @azure/static-web-apps-cli deploy ./frontend/dist \
-  --deployment-token "$SWA_TOKEN" \
+# 3. Deploy pre-built production dist folder
+npx @azure/static-web-apps-cli deploy ./frontend/dist `
+  --deployment-token "$SWA_TOKEN" `
   --env production
 ```
 
 ---
 
-### Step 6: Configure Custom Domain (`invoice-review-app.najeebsayyed.in`)
+### Step 3: Link Custom Domain (`invoice-review-app.najeebsayyed.in`)
 
-1. In your DNS manager for `najeebsayyed.in` (e.g. Cloudflare, Namecheap, GoDaddy):
-   - Add a **CNAME** record:
-     - **Name / Host:** `invoice-review-app`
-     - **Target / Value:** `<your-static-web-app-name>.azurestaticapps.net`
-     - **TTL:** Automatic / 3600
-     - *(If using Cloudflare: set Proxy status to **DNS Only** (Gray Cloud) during domain validation).*
-2. In the Azure Portal:
-   - Navigate to **Static Web Apps** -> `invoice-review-frontend` -> **Custom domains** -> **+ Add**.
-   - Select **Custom domain on other DNS**, enter `invoice-review-app.najeebsayyed.in`.
-   - Click **Validate**. Azure validates the CNAME and automatically provisions a DigiCert TLS/SSL certificate with automatic renewal.
+1. **Add CNAME Record in Cloudflare (or your DNS manager):**
+   Log into Cloudflare for `najeebsayyed.in` and add:
+   - **Type:** `CNAME`
+   - **Name / Host:** `invoice-review-app`
+   - **Target / Value:** `<your-app-name>.azurestaticapps.net` *(the default hostname of your Static Web App)*
+   - **Proxy status:** **DNS Only** (Gray cloud — required during Azure validation)
+   - **TTL:** Auto
+
+2. **Add Custom Domain in Azure:**
+   - In Azure Portal, open **Static Web Apps** -> `invoice-review-frontend` -> **Custom domains** -> **+ Add**.
+   - Select **Custom domain on other DNS**.
+   - Enter `invoice-review-app.najeebsayyed.in` and click **Validate**.
+   - Azure validates the CNAME and automatically requests and installs a free DigiCert TLS/SSL certificate.
+
+3. *(Optional)* In Cloudflare, once validated and active, you can re-enable the Orange cloud (Proxied) for CDN acceleration.
 
 ---
 
-## 4. Verification & Testing Checklist
+## 4. Cost Optimization & Management Tips
 
-- [x] **PostgreSQL Connectivity**: TCP port 5432 verified from current workstation (`TcpTestSucceeded: True`).
-- [x] **Application Database**: Database `invoice_review` created in `invoice-review-db` with UTF-8 charset.
-- [x] **Database Drivers**: `psycopg[binary]==3.2.5` and pure-Python `pg8000==1.31.2` installed in `pyproject.toml` and `uv.lock`.
-- [x] **Firewall Protection**: Azure PostgreSQL firewall restricted to your specific workstation subnet (`152.56.5.0/24`), protecting the server from unauthorized public internet traffic.
-- [x] **Health Check**: `GET /health` endpoint ready for Container Apps liveness/startup probes.
-- [x] **CORS Configuration**: Dynamic origin resolution supporting `localhost`, `invoice-review-app.najeebsayyed.in`, and `*.azurestaticapps.net`.
-- [x] **Client-Side SPA Routing**: `staticwebapp.config.json` configured to prevent 404 errors on page reload.
+- **Container Apps Autoscaling:** `invoice-review-api` is configured with `min-replicas: 0`. When no visitor is using the application, the backend scales to 0 instances and consumes **\$0**.
+- **PostgreSQL Flexible Server:** To preserve student credits when not demoing the portfolio app:
+  ```powershell
+  # Stop server when not in use:
+  az postgres flexible-server stop --resource-group rg-invoice-review --name invoice-review-db
+
+  # Start server before testing / demoing:
+  az postgres flexible-server start --resource-group rg-invoice-review --name invoice-review-db
+  ```
+- **Storage:** Azure Storage Account `stginvoicereview` uses Standard LRS with public access disabled, well within the 5 GB student tier.
