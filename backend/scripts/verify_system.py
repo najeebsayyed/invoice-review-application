@@ -28,6 +28,7 @@ from app.database import build_database  # noqa: E402
 from app.documents.models import DocumentRecord  # noqa: E402
 from app.documents.repository import DocumentRepository  # noqa: E402
 from app.documents.routes import router as document_router  # noqa: E402
+from app.storage import LocalFileStorage  # noqa: E402
 
 
 def build_verification_app(temp_dir: Path) -> tuple[FastAPI, DocumentRepository]:
@@ -53,6 +54,7 @@ def build_verification_app(temp_dir: Path) -> tuple[FastAPI, DocumentRepository]
     app.state.config = config
     app.state.engine = engine
     app.state.session_factory = session_factory
+    app.state.storage = LocalFileStorage(upload_path)
 
     app.include_router(document_router)
     app.include_router(accounting_router)

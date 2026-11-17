@@ -11,10 +11,11 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import Engine, text
 
 from app.accounting.routes import router as accounting_router
-from app.config import APP_CONFIG, get_settings
+from app.config import get_app_config, get_settings
 from app.database import build_database
 from app.documents.models import DocumentRecord
 from app.documents.routes import router as document_router
+from app.storage import build_storage_backend
 
 
 def _sync_sqlite_schema(engine: Engine) -> None:
@@ -55,7 +56,8 @@ def _sync_sqlite_schema(engine: Engine) -> None:
 
 def create_app() -> FastAPI:
     """Construct and configure the FastAPI application."""
-    config = APP_CONFIG
+    settings = get_settings()
+    config = get_app_config(settings)
     config.upload_dir.mkdir(parents=True, exist_ok=True)
     if config.database_url.startswith("sqlite:///"):
         db_path = config.database_url.removeprefix("sqlite:///")
@@ -65,7 +67,7 @@ def create_app() -> FastAPI:
     DocumentRecord.metadata.create_all(engine)
     _sync_sqlite_schema(engine)
 
-    settings = get_settings()
+    storage = build_storage_backend(config, settings)
 
     app = FastAPI(
         title="Invoice Review API",
@@ -78,13 +80,16 @@ def create_app() -> FastAPI:
     app.state.config = config
     app.state.engine = engine
     app.state.session_factory = session_factory
+    app.state.storage = storage
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=[settings.allowed_origin],
+        allow_origins=settings.cors_origins,
+        allow_origin_regex=settings.cors_origin_regex,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=["*"],
     )
 
     app.include_router(document_router)

@@ -31,6 +31,7 @@ from app.documents.service import (
     DocumentService,
 )
 from app.invoices.validation import ValidationIssue
+from app.storage import StorageBackend
 
 router = APIRouter(prefix="/api/documents", tags=["documents"])
 
@@ -75,12 +76,14 @@ def get_repository(session: Annotated[Session, Depends(get_session)]) -> Documen
 def build_service(request: Request, repository: DocumentRepository) -> DocumentService:
     """Helper constructing a DocumentService with application state configuration."""
     config: AppConfig = request.app.state.config
+    storage: StorageBackend | None = getattr(request.app.state, "storage", None)
     return DocumentService(
         repository=repository,
         upload_dir=config.upload_dir,
         expected_customer_name=config.expected_customer_name,
         expected_customer_vat_id=config.expected_customer_vat_id,
         min_confidence=config.min_field_confidence,
+        storage=storage,
     )
 
 
@@ -168,22 +171,38 @@ def get_document_file(
     workspace_id: Annotated[str, Depends(get_workspace_id)],
     request: Request,
     repository: Annotated[DocumentRepository, Depends(get_repository)],
-) -> FileResponse:
+) -> Response:
     """Retrieve original uploaded binary file for a document belonging to the workspace."""
     service = build_service(request, repository)
     try:
         record = service.get(document_id, workspace_id=workspace_id)
     except DocumentNotFoundError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
-    path = request.app.state.config.upload_dir / Path(record.stored_filename).name
-    if not path.is_file():
-        raise HTTPException(status_code=404, detail="Stored document file was not found.")
-    return FileResponse(
-        path,
-        media_type=record.content_type,
-        filename=record.original_filename,
-        content_disposition_type="inline",
-    )
+
+    safe_name = Path(record.stored_filename).name
+    path = request.app.state.config.upload_dir / safe_name
+    if path.is_file():
+        return FileResponse(
+            path,
+            media_type=record.content_type,
+            filename=record.original_filename,
+            content_disposition_type="inline",
+        )
+
+    # Check persistent storage (e.g. Azure Blob Storage) if file is not on local container disk
+    storage: StorageBackend | None = getattr(request.app.state, "storage", None)
+    if storage is not None:
+        blob_content = storage.get(safe_name)
+        if blob_content is not None:
+            return Response(
+                content=blob_content,
+                media_type=record.content_type,
+                headers={
+                    "Content-Disposition": f'inline; filename="{record.original_filename}"'
+                },
+            )
+
+    raise HTTPException(status_code=404, detail="Stored document file was not found.")
 
 
 @router.delete("/{document_id}", status_code=status.HTTP_204_NO_CONTENT)

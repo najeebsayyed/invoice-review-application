@@ -1,8 +1,6 @@
-const configuredBaseUrl = import.meta.env.VITE_API_BASE_URL
+const configuredBaseUrl =
+  import.meta.env.VITE_API_BASE_URL ?? (import.meta.env.DEV ? 'http://localhost:8000' : '')
 
-if (configuredBaseUrl === undefined || configuredBaseUrl === null) {
-  throw new Error('VITE_API_BASE_URL is required')
-}
-
-// Same-origin container builds set VITE_API_BASE_URL=/ so fetches stay relative.
-export const apiBaseUrl = configuredBaseUrl === '/' ? '' : configuredBaseUrl.replace(/\/$/, '')
+// Same-origin container builds or empty baseUrl set VITE_API_BASE_URL=/ so fetches stay relative.
+export const apiBaseUrl =
+  !configuredBaseUrl || configuredBaseUrl === '/' ? '' : configuredBaseUrl.replace(/\/$/, '')

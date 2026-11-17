@@ -25,9 +25,6 @@ class AppConfig:
     min_field_confidence: float = 0.80
 
 
-APP_CONFIG = AppConfig()
-
-
 class Settings(BaseSettings):
     """Environment-based settings read exclusively from .env."""
 
@@ -42,6 +39,30 @@ class Settings(BaseSettings):
     openai_api_key: str | None = Field(default=None)
     openai_model: str = DEPLOYMENT_NAME
     allowed_origin: str = "http://localhost:5173"
+    allowed_origins: str = (
+        "http://localhost:5173,"
+        "http://localhost:4173,"
+        "https://invoice-review-app.najeebsayyed.in"
+    )
+    cors_origin_regex: str | None = r"^https:\/\/.*\.azurestaticapps\.net$"
+    database_url: str | None = None
+    upload_dir: Path | None = None
+    azure_storage_connection_string: str | None = Field(default=None)
+    azure_storage_container_name: str = "invoices"
+    port: int = 8000
+    host: str = "0.0.0.0"
+
+    @property
+    def cors_origins(self) -> list[str]:
+        """Aggregate allowed origins from both single and multi-origin configuration."""
+        origins: set[str] = set()
+        for raw in (self.allowed_origins, self.allowed_origin):
+            if raw:
+                for item in raw.split(","):
+                    cleaned = item.strip().rstrip("/")
+                    if cleaned:
+                        origins.add(cleaned)
+        return sorted(origins)
 
     def resolve_frontend_dist(self) -> Path | None:
         """Resolve built frontend static assets directory if available."""
@@ -58,3 +79,17 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     """Return cached Settings instance."""
     return Settings()
+
+
+def get_app_config(settings: Settings | None = None) -> AppConfig:
+    """Construct AppConfig using optional runtime Settings overrides."""
+    s = settings or get_settings()
+    db_url = s.database_url or f"sqlite:///{(BACKEND_ROOT / 'data' / 'documents.db').as_posix()}"
+    up_dir = s.upload_dir or (BACKEND_ROOT / "data" / "uploads")
+    return AppConfig(
+        database_url=db_url,
+        upload_dir=up_dir,
+    )
+
+
+APP_CONFIG = get_app_config()

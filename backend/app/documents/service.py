@@ -27,6 +27,7 @@ from app.pipeline import GlSuggestion, create_pipeline
 from app.schemas.invoice import InvoiceData
 from app.schemas.receipt import ReceiptData
 from app.services.openai_service import OpenAIService
+from app.storage import LocalFileStorage, StorageBackend
 
 logger = logging.getLogger(__name__)
 
@@ -92,12 +93,14 @@ class DocumentService:
         expected_customer_name: str,
         expected_customer_vat_id: str,
         min_confidence: float,
+        storage: StorageBackend | None = None,
     ) -> None:
         self.repository = repository
         self.upload_dir = upload_dir
         self.expected_customer_name = expected_customer_name
         self.expected_customer_vat_id = expected_customer_vat_id
         self.min_confidence = min_confidence
+        self.storage = storage or LocalFileStorage(upload_dir)
 
     def process(
         self,
@@ -114,6 +117,7 @@ class DocumentService:
         self.upload_dir.mkdir(parents=True, exist_ok=True)
         stored_path = self.upload_dir / stored_filename
         stored_path.write_bytes(content)
+        self.storage.save(stored_filename, content, content_type)
 
         self.repository.create_processing(
             record_id=record_id,
@@ -269,8 +273,9 @@ class DocumentService:
     def delete(self, record_id: str, workspace_id: str) -> None:
         """Delete document record and associated file on disk within workspace."""
         record = self.get(record_id, workspace_id=workspace_id)
-        stored_path = self.upload_dir / Path(record.stored_filename).name
         self.repository.delete(record_id, workspace_id=workspace_id)
+        self.storage.delete(record.stored_filename)
+        stored_path = self.upload_dir / Path(record.stored_filename).name
         stored_path.unlink(missing_ok=True)
 
     def select_gl_account(

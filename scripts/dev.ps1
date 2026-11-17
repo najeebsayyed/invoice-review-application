@@ -25,7 +25,7 @@ Write-Host "Starting Invoice Review Backend (:8000) and Frontend (:5173)..." -Fo
 $backendJob = Start-Job -ScriptBlock {
     param($rootPath)
     Set-Location "$rootPath/backend"
-    cmd.exe /c "uv run --locked --no-sync uvicorn app.main:create_app --factory --reload --port 8000 2>&1"
+    cmd.exe /c "uv run --locked --no-sync python -m uvicorn app.main:create_app --factory --reload --port 8000 2>&1"
 } -ArgumentList $root
 
 $frontendJob = Start-Job -ScriptBlock {
